@@ -1,0 +1,83 @@
+{
+  "name": "buddy-hud",
+  "version": "0.1.0",
+  "description": "A floating pixel buddy that shows what Claude Code is doing - live diffs, permissions, context, replies. Unofficial.",
+  "main": "main.js",
+  "scripts": {
+    "start": "node scripts/start.js",
+    "hooks": "node install-hooks.js",
+    "hooks:remove": "node install-hooks.js --uninstall",
+    "dist": "electron-builder",
+    "dist:linux": "electron-builder --linux",
+    "dist:mac": "electron-builder --mac",
+    "dist:win": "electron-builder --win",
+    "promo": "electron promo/record.js portrait promo/out.mp4"
+  },
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^44.8.0"
+  },
+  "productName": "Buddy HUD",
+  "author": "samir-kumal",
+  "keywords": [
+    "claude-code",
+    "claude",
+    "hud",
+    "overlay",
+    "electron",
+    "desktop-companion",
+    "hooks"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/OWNER/buddy-hud.git"
+  },
+  "build": {
+    "appId": "dev.buddyhud.app",
+    "productName": "Buddy HUD",
+    "artifactName": "buddy-hud-${version}-${os}-${arch}.${ext}",
+    "files": [
+      "main.js",
+      "preload.js",
+      "install-hooks.js",
+      "renderer/**",
+      "build/icon.png",
+      "build/tray.png",
+      "build/tray@2x.png",
+      "package.json"
+    ],
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "category": "Development",
+      "icon": "build/icon.png",
+      "executableArgs": [
+        "--no-sandbox"
+      ]
+    },
+    "mac": {
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "category": "public.app-category.developer-tools",
+      "icon": "build/icon.png",
+      "extendInfo": {
+        "LSUIElement": true
+      }
+    },
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ],
+      "icon": "build/icon.png"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false
+    }
+  }
+}
