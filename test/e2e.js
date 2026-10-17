@@ -9,6 +9,7 @@ const { spawn, exec } = require('child_process');
 
 const PORT = 47811;
 const home = fs.mkdtempSync(path.join(os.tmpdir(), 'buddy-e2e-'));
+fs.mkdirSync(path.join(home, 'AppData', 'Roaming'), { recursive: true }); // Windows: Electron resolves userData under USERPROFILE
 const env = { ...process.env, HOME: home, USERPROFILE: home, HUD_TEST: '1', HUD_PHONE: '1', BUDDY_PHONE_PORT: '47813', BUDDY_PORT: String(PORT), XDG_SESSION_TYPE: 'x11' };
 process.env.HOME = home; process.env.USERPROFILE = home; process.env.BUDDY_PORT = String(PORT);
 const { run } = require('../install-hooks');
@@ -131,7 +132,9 @@ const waitFor = async (fn, what, ms = 6000) => { const t = Date.now(); for (;;) 
   } catch (e) {
     failed = true; console.error('e2e FAILED:', e.message, e.where || '');
   } finally {
-    app.kill('SIGKILL'); fs.rmSync(home, { recursive: true, force: true });
+    const exited = new Promise((r) => app.once('exit', r));
+    app.kill('SIGKILL'); await exited;
+    try { fs.rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }); } catch {} // Windows: helper processes release files late
     process.exit(failed ? 1 : 0);
   }
 })();

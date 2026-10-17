@@ -44,4 +44,20 @@ assert.strictEqual(JSON.parse(fs.readFileSync(settingsPath + '.bak-buddy-hud', '
 fs.writeFileSync(settingsPath, '   ');
 assert.doesNotThrow(() => run(false), 'empty settings.json is treated as {}');
 
+// 6. Windows hook command: no cmd /c wrapper (Git Bash turns /c into C:/ and cmd then runs the payload), quoted @-
+const ih = require('../install-hooks');
+const plat = Object.getOwnPropertyDescriptor(process, 'platform');
+Object.defineProperty(process, 'platform', { value: 'win32' });
+delete require.cache[require.resolve('../install-hooks')];
+const ihWin = require('../install-hooks');
+ihWin.run(false);
+const winCmd = JSON.parse(fs.readFileSync(settingsPath, 'utf8')).hooks.PreToolUse.find((g) => g.hooks.some((h) => h.command.includes('47800'))).hooks[0].command;
+assert.ok(!/cmd \/c/.test(winCmd), 'Windows hook must not use cmd /c: ' + winCmd);
+assert.ok(winCmd.startsWith('curl.exe ') && winCmd.includes('--data-binary "@-"'), winCmd);
+fs.writeFileSync(settingsPath, JSON.stringify({ hooks: { Stop: [{ matcher: '*', hooks: [{ type: 'command', command: 'cmd /c "curl.exe -s -X POST --data-binary @- http://127.0.0.1:47800/hook || exit /b 0"' }] }] } }));
+assert.ok(ihWin.hasUnsafeWindowsHook(), 'old unsafe hook is detected');
+ihWin.run(false);
+assert.ok(!ihWin.hasUnsafeWindowsHook(), 'reinstall replaces the unsafe hook');
+Object.defineProperty(process, 'platform', plat);
+
 console.log('install-hooks: all tests passed');

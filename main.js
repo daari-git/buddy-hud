@@ -23,7 +23,11 @@ if (isLinux && process.env.XDG_SESSION_TYPE === 'wayland' && !process.argv.some(
   app.exit(0);
 }
 const gotLock = app.requestSingleInstanceLock();
-if (!gotLock) app.exit(0);
+if (!gotLock) {
+  // usually "already running"; can also mean userData could not be resolved (e.g. an empty USERPROFILE on Windows)
+  console.error('Buddy HUD: single-instance lock not acquired (another copy running, or userData unavailable). Exiting.');
+  app.exit(0);
+}
 
 // ---------- state ----------
 const sessions = new Map(); // id -> session
@@ -800,6 +804,11 @@ app.setAppUserModelId('dev.buddyhud.app'); // Windows toast notifications need a
 app.whenReady().then(async () => {
   Menu.setApplicationMenu(null);
   if (isMac && app.dock) app.dock.hide();
+  // Security fix: replace Windows hooks from older versions (cmd /c ran hook payloads as commands under Git Bash)
+  try {
+    const ih = require('./install-hooks');
+    if (process.platform === 'win32' && ih.hasUnsafeWindowsHook()) { ih.run(false); hooksCache.t = 0; toast('Buddy HUD', 'Updated your Claude Code hooks to a safer Windows command. Restart running Claude sessions.'); }
+  } catch (e) { console.error('hook migration failed:', e); }
   const firstRun = !TEST && !fs.existsSync(SETTINGS_FILE);
   createWindow();
   if (!TEST) buildTray();

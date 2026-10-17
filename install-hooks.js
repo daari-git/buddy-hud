@@ -11,10 +11,13 @@ const LEGACY = 'claude-hud/hook.js';
 // Permission / Stop hooks wait for the overlay, so they get a long timeout and no curl cap.
 const EVENTS = { SessionStart: 0, SessionEnd: 0, UserPromptSubmit: 0, PreToolUse: 0, PostToolUse: 0, Notification: 0, SubagentStop: 0, PermissionRequest: 900, Stop: 900 };
 
-// POSIX: `|| true` keeps Claude Code quiet when the app is not running. Windows: no TMUX, and the
-// `cmd /c` wrapper gives the same "never fail" behaviour in cmd, PowerShell and Git Bash alike.
+// POSIX: `|| true` keeps Claude Code quiet when the app is not running.
+// Windows: Claude Code runs hooks through Git Bash, which rewrites a bare "/c" into "C:/" (MSYS path conversion),
+// so any `cmd /c "..."` wrapper turns into an interactive cmd that executes the hook's JSON as commands.
+// Plain curl.exe with a quoted "@-" works unchanged in Git Bash, cmd.exe and PowerShell 5.1. Trade-off: if the app is
+// not running, curl exits non-zero and Claude Code shows a non-blocking hook error.
 const command = (long) => process.platform === 'win32'
-  ? `cmd /c "curl.exe -s ${long ? '' : '-m 3 '}-X POST -H Content-Type:application/json --data-binary @- ${URL} || exit /b 0"`
+  ? `curl.exe -s ${long ? '' : '-m 3 '}-X POST -H Content-Type:application/json --data-binary "@-" ${URL}`
   : `curl -s ${long ? '' : '-m 3 '}-X POST -H "Content-Type: application/json" -H "X-Buddy-Tmux: \${TMUX:-}" -H "X-Buddy-Pane: \${TMUX_PANE:-}" --data-binary @- ${URL} || true`;
 
 function readSettings() {
@@ -47,5 +50,10 @@ function run(uninstall) {
   return uninstall ? 'Hooks removed from ' + FILE : 'Hooks installed in ' + FILE + ' - restart running Claude Code sessions';
 }
 
-module.exports = { run };
+// Hooks written by v0.2.0-v0.4.1 on Windows used `cmd /c`, which is unsafe under Git Bash (see above).
+function hasUnsafeWindowsHook() {
+  try { return fs.readFileSync(FILE, 'utf8').includes('cmd /c \\"curl.exe'); } catch { return false; }
+}
+
+module.exports = { run, hasUnsafeWindowsHook };
 if (require.main === module) console.log(run(process.argv.includes('--uninstall')));

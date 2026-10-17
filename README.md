@@ -74,8 +74,8 @@ Claude Code [hooks](https://docs.claude.com/en/docs/claude-code/hooks) POST each
 ## Platform notes
 
 - **Linux:** runs through XWayland so it can stay on top under Wayland. Tested on Ubuntu 26.04 / GNOME.
-- **macOS and Windows:** the code paths exist (tray, always-on-top, login item, packaging) but have **not been tested on real machines yet**. Please open an issue with what you see.
-- On Windows, hooks run in the shell Claude Code uses. Git Bash is the best-supported setup because the hook reads `$TMUX`.
+- **Windows:** tested by a community member on Windows 11 (hooks, buddy, tests). **macOS:** not yet tested on a real machine. Please open an issue with what you see.
+- On Windows the hook is a plain `curl.exe` call (works from Git Bash, cmd and PowerShell). If Buddy HUD is not running, Claude Code may show a harmless non-blocking hook error. Reported working on Windows 11 by a tester.
 
 ## Privacy and security
 
