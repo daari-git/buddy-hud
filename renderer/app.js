@@ -21,7 +21,7 @@ const MODELS = {
   sonnet: [['Sonnet 5.5', 'claude-sonnet-5-5', 1], ['Sonnet 5', 'claude-sonnet-5', 1], ['Sonnet 4.6', 'claude-sonnet-4-6', 1], ['Sonnet 4.5', 'claude-sonnet-4-5', 1], ['Sonnet 4', 'claude-sonnet-4-0']],
   haiku: [['Haiku 5.5', 'claude-haiku-5-5'], ['Haiku 4.5', 'claude-haiku-4-5']],
 };
-let pickFam = null, pick1m = false;
+let pickFam = null, pick1m = false, pickWait = false, noteSeen = 0;
 const famOf = (m) => ((String(m || '').match(/fable|opus|sonnet|haiku/i) || [''])[0]).toLowerCase();
 const modelLabel = (m) => {
   const x = String(m || '').match(/claude-(fable|opus|sonnet|haiku)-(\d+)(?:-(\d{1,2})(?!\d))?/i);
@@ -217,13 +217,22 @@ function render() {
       const inUse = alias ? false : !!curId && sameModel(curId, id);
       return `<button class="mrow ${inUse ? 'on' : ''}" data-arg="${arg}" data-name="${esc(n)}" style="--c:${f.c}"><span class="nm">${esc(n)}${alias ? '' : pick1m && m1 ? ' · 1M' : ''}</span><span class="sm">${inUse ? '✓ in use' : '/model ' + arg}</span></button>`;
     }).join('');
+    const note = s.pickNote && s.pickNote.t > noteSeen ? s.pickNote : null;
+    if (pickWait && note) pickWait = false;
+    if (note && note.mode === 'typed') { noteSeen = note.t; picker = false; $('picker').hidden = true; }
+    else if (note) {
+      setHtml($('picker'), `<div class="h">📋 <span>Copied <code>${esc(note.cmd)}</code></span></div><div class="sub" style="font-family:inherit">I can't type into this terminal (${esc(note.why)}), so paste it into Claude Code and press Enter. The buddy keeps showing the model Claude is really using until it confirms the switch.</div><div class="btnRow"><button id="npDefault">Also use ${esc(note.label || note.arg)} for new sessions</button><button id="npClose">Done</button></div><div class="ph">Tip: run <code>claude</code> inside tmux and I can type it for you.</div>`);
+      $('npClose').onclick = () => { noteSeen = note.t; picker = false; render(); };
+      $('npDefault').onclick = () => { hud.send('setDefaultModel', { arg: note.arg }); noteSeen = note.t; picker = false; render(); };
+    } else {
     setHtml($('picker'), `<div class="ph">Switch model for <b>${esc(s.project)}</b></div><div class="ftabs">${tabs}</div><div class="mlist">${rows}</div><label class="m1"><input type="checkbox" id="pick1m" ${pick1m ? 'checked' : ''}> 1M context variants</label><div class="ph">${s.tmux ? 'Typed into your tmux pane when Claude is idle.' : 'Copies the /model command: paste it into Claude Code.'} Availability depends on your plan.</div>`);
     $('picker').querySelectorAll('.ft').forEach((b) => (b.onclick = () => { pickFam = b.dataset.fam; render(); }));
     $('pick1m').onchange = (e) => { pick1m = e.target.checked; render(); };
     $('picker').querySelectorAll('.mrow').forEach((b) => (b.onclick = () => {
       hud.send('pickModel', { sessionId: s.id, family: pickFam, arg: b.dataset.arg, label: b.dataset.name });
-      picker = false; render();
+      pickWait = true; render();
     }));
+    }
   }
 
   // onboarding / empty states
@@ -259,7 +268,7 @@ new ResizeObserver(fit).observe($('stage'));
 
 hud.onState((s) => { state = s; render(); });
 window.__push = (s) => { state = s; render(); };
-window.__ui = (o) => { if ('drawer' in o) drawer = o.drawer; if ('picker' in o) picker = o.picker; render(); };
+window.__ui = (o) => { if ('drawer' in o) drawer = o.drawer; if ('picker' in o) picker = o.picker; if (o.pick) hud.send('pickModel', o.pick); render(); };
 setInterval(render, 1500);
 render();
 

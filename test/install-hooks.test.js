@@ -39,4 +39,13 @@ assert.ok(s.hooks.PreToolUse.some((g) => g.hooks.some((h) => h.command === 'echo
 assert.ok(!s.hooks.Stop, 'Stop hook should be gone');
 assert.ok(fs.existsSync(settingsPath + '.bak-buddy-hud'));
 
+// 5. default-model helper keeps hooks and rejects junk
+const { setModel } = require('../install-hooks');
+run(false);
+setModel('claude-haiku-4-5');
+s = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
+assert.strictEqual(s.model, 'claude-haiku-4-5');
+assert.ok(s.hooks.Stop, 'setModel must not drop hooks');
+assert.throws(() => setModel('x; rm -rf /'));
+
 console.log('install-hooks: all tests passed');

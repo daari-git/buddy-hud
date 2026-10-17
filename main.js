@@ -482,20 +482,27 @@ ipcMain.on('installHooks', () => {
 ipcMain.on('pickModel', (_e, { sessionId, family, arg, label }) => {
   const s = sessions.get(sessionId);
   if (!s || !/^[A-Za-z0-9._\-\[\]]+$/.test(String(arg))) return;
-  s.pickedModel = family; s.pickedId = arg; s.pickedLabel = label || ''; s.pickedAt = Date.now();
   const cmd = `/model ${arg}`;
   if (s.tmux && ['done', 'waiting', 'idle'].includes(s.status)) {
+    // really switches: type the slash command into the pane Claude Code runs in
+    s.pickedModel = family; s.pickedId = arg; s.pickedLabel = label || ''; s.pickedAt = Date.now();
     const base = ['-S', s.tmux.socket];
     execFile('tmux', [...base, 'send-keys', '-t', s.tmux.pane, '-l', cmd], () =>
       setTimeout(() => execFile('tmux', [...base, 'send-keys', '-t', s.tmux.pane, 'Enter'], () => {}), 120));
+    s.pickNote = { mode: 'typed', cmd, arg, label, t: Date.now() };
     pushFeed(s, { emoji: '🎛️', text: `switching model: ${cmd}`, kind: 'info' });
   } else {
+    // no way to type into an arbitrary terminal: copy the command, and do NOT pretend the model changed
     clipboard.writeText(cmd);
-    toast('Buddy HUD', `Copied "${cmd}". Paste it into Claude Code to switch models.`);
+    s.pickNote = { mode: 'copied', cmd, arg, label, why: s.tmux ? 'Claude is busy' : 'not running inside tmux', t: Date.now() };
     pushFeed(s, { emoji: '📋', text: `copied ${cmd} — paste in Claude Code`, kind: 'info' });
   }
   emit();
 });
+ipcMain.on('setDefaultModel', (_e, { arg }) => {
+  try { toast('Buddy HUD', require('./install-hooks').setModel(String(arg))); } catch (e) { toast('Buddy HUD', 'Could not set default model: ' + e.message); }
+});
+
 
 app.on('second-instance', () => { if (win) { pinned = true; win.showInactive(); emit(); } });
 // drop sessions whose Claude Code process died without sending SessionEnd
