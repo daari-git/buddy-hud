@@ -221,7 +221,7 @@ function render() {
     if (pickWait && note) pickWait = false;
     if (note && note.mode === 'typed') { noteSeen = note.t; picker = false; $('picker').hidden = true; }
     else if (note) {
-      setHtml($('picker'), `<div class="h">📋 <span>Copied <code>${esc(note.cmd)}</code></span></div><div class="sub" style="font-family:inherit">I can't type into this terminal (${esc(note.why)}), so paste it into Claude Code and press Enter. The buddy keeps showing the model Claude is really using until it confirms the switch.</div><div class="btnRow"><button id="npDefault">Also use ${esc(note.label || note.arg)} for new sessions</button><button id="npClose">Done</button></div><div class="ph">Tip: run <code>claude</code> inside tmux and I can type it for you.</div>`);
+      setHtml($('picker'), `<div class="h">📋 <span>Copied <code>${esc(note.cmd)}</code></span></div><div class="sub" style="font-family:inherit;word-break:normal">I can't type into this terminal (${esc(note.why)}), so paste it into Claude Code and press Enter. The buddy keeps showing the model Claude is really using until it confirms the switch.</div><div class="btnRow"><button id="npDefault">Also use ${esc(note.label || note.arg)} for new sessions</button><button id="npClose">Done</button></div><div class="ph">Tip: run <code>claude</code> inside tmux and I can type it for you.</div>`);
       $('npClose').onclick = () => { noteSeen = note.t; picker = false; render(); };
       $('npDefault').onclick = () => { hud.send('setDefaultModel', { arg: note.arg }); noteSeen = note.t; picker = false; render(); };
     } else {
