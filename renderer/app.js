@@ -14,9 +14,17 @@ const FAMILIES = {
   sonnet: { name: 'Sonnet', c: '#d97757', c2: '#f0956f', arg: 'sonnet' },
   haiku: { name: 'Haiku', c: '#2fb7a3', c2: '#7ee2d1', arg: 'haiku' },
 };
+// Versions Claude Code knows about (mirrors its /model list; what your plan can use varies)
+const MODELS = {
+  fable: [['Fable 5.1', 'claude-fable-5-1'], ['Fable 5', 'claude-fable-5', 1]],
+  opus: [['Opus 5.5', 'claude-opus-5-5', 1], ['Opus 5', 'claude-opus-5', 1], ['Opus 4.8', 'claude-opus-4-8', 1], ['Opus 4.7', 'claude-opus-4-7'], ['Opus 4.6', 'claude-opus-4-6', 1], ['Opus 4.5', 'claude-opus-4-5'], ['Opus 4.1', 'claude-opus-4-1'], ['Opus 4', 'claude-opus-4-0']],
+  sonnet: [['Sonnet 5.5', 'claude-sonnet-5-5', 1], ['Sonnet 5', 'claude-sonnet-5', 1], ['Sonnet 4.6', 'claude-sonnet-4-6', 1], ['Sonnet 4.5', 'claude-sonnet-4-5', 1], ['Sonnet 4', 'claude-sonnet-4-0']],
+  haiku: [['Haiku 5.5', 'claude-haiku-5-5'], ['Haiku 4.5', 'claude-haiku-4-5']],
+};
+let pickFam = null, pick1m = false;
 const famOf = (m) => ((String(m || '').match(/fable|opus|sonnet|haiku/i) || [''])[0]).toLowerCase();
 const modelLabel = (m) => {
-  const x = String(m || '').match(/claude-(fable|opus|sonnet|haiku)-(\d+)(?:-(\d{1,2}))?/i);
+  const x = String(m || '').match(/claude-(fable|opus|sonnet|haiku)-(\d+)(?:-(\d{1,2})(?!\d))?/i);
   if (x) return FAMILIES[x[1].toLowerCase()].name + ' ' + x[2] + (x[3] ? '.' + x[3] : '');
   return famOf(m) ? FAMILIES[famOf(m)].name : '';
 };
@@ -35,6 +43,15 @@ function md(src) {
   t = t.replace(/\u0000C(\d+)\u0000/g, (_, i) => `<code>${codes[i]}</code>`).replace(/\u0000B(\d+)\u0000/g, (_, i) => `<pre>${blocks[i]}</pre>`);
   return t;
 }
+// Only touch the DOM when the markup changed, and keep scroll position: re-rendering under the cursor
+// swallowed clicks and reset scrolling.
+function setHtml(el, html) {
+  if (el.__html === html) return;
+  const top = el.scrollTop;
+  el.innerHTML = html; el.__html = html; el.scrollTop = top;
+}
+const normId = (m) => String(m || '').replace(/\[1m\]$/, '').replace(/-v\d+$/, '').replace(/-\d{8}$/, '');
+const sameModel = (a, id) => { const x = normId(a); return x === id || (id.endsWith('-4-0') && x === id.slice(0, -2)); };
 const plain = (s) => String(s ?? '').replace(/\*\*|__|`/g, '').replace(/^#{1,6}\s+/gm, '').replace(/^\s*[-*]\s+/gm, '').replace(/\s*\n\s*/g, ' ');
 const base = (p) => String(p).split(/[\\/]/).pop();
 
@@ -125,7 +142,7 @@ function render() {
   const rs = document.documentElement.style;
   rs.setProperty('--orange', th.c); rs.setProperty('--orange2', th.c2);
   document.body.classList.toggle('privacy', !!(state.settings && state.settings.privacy));
-  const label = s ? (s.pickedModel && s.pickedModel !== famOf(s.model) ? th.name + ' …' : modelLabel(s.model) || th.name) : '';
+  const label = s ? (s.pickedModel ? (s.pickedLabel || th.name) + ' …' : modelLabel(s.model) || th.name) : '';
   $('modelTag').hidden = !s; $('modelTag').querySelector('span').textContent = label;
 
   const svg = $('clawd');
@@ -141,12 +158,12 @@ function render() {
   $('pill').title = s ? `${s.files.read.length} files read · ${s.files.edited.length} files edited · ${s.stats.cmds} commands` : '';
 
   // permission bubbles
-  $('perms').innerHTML = perms.map((p) => {
+  setHtml($('perms'), perms.map((p) => {
     const proj = (ss.find((x) => x.id === p.sessionId) || {}).project || '';
     return `<div class="bubble perm"><div class="h">${p.emoji} <span>Can I use <b>${esc(p.tool)}</b>?</span><span class="grow"></span><span class="dim">${esc(proj)}</span></div>
       <div class="sub">${esc(p.summary)}</div>${diffHtml(p.diff)}
       <div class="acts"><button class="allow" data-d="allow" data-id="${p.id}">✅ Allow</button><button class="deny" data-d="deny" data-id="${p.id}">⛔ Deny</button><button data-d="terminal" data-id="${p.id}">⌨️ Terminal</button></div></div>`;
-  }).join('');
+  }).join(''));
   $('perms').querySelectorAll('button').forEach((b) => (b.onclick = () => hud.send('decide', { id: b.dataset.id, behavior: b.dataset.d })));
 
   // action bubble: current tool, or last tool for 3s, or done summary
@@ -168,7 +185,7 @@ function render() {
     }
   }
   act.hidden = !html || drawer;
-  if (html && !drawer) act.innerHTML = html;
+  if (html && !drawer) setHtml(act, html);
 
   // drawer
   $('drawer').hidden = !drawer;
@@ -179,31 +196,45 @@ function render() {
     $('optPrivacy').checked = !!state.settings.privacy;
     $('ver').textContent = 'Buddy HUD v' + (state.version || '');
     $('tabs').hidden = ss.length < 2;
-    $('tabs').innerHTML = ss.map((x) => `<button data-id="${x.id}" class="${x.id === selected ? 'on' : ''}">${esc(x.project)}</button>`).join('');
+    setHtml($('tabs'), ss.map((x) => `<button data-id="${x.id}" class="${x.id === selected ? 'on' : ''}">${esc(x.project)}</button>`).join(''));
     $('tabs').querySelectorAll('button').forEach((b) => (b.onclick = () => { selected = b.dataset.id; render(); }));
-    $('chips').innerHTML = s ? `<span class="chip">🧠 ${fmt(s.ctx.used)} / ${fmt(s.ctx.max)}</span><span class="chip">📖 ${s.stats.reads} reads</span><span class="chip">✏️ ${s.stats.edits} edits</span><span class="chip">💻 ${s.stats.cmds} cmds</span><span class="chip">🛠️ ${s.stats.other} other</span><span class="chip proj">${esc(s.project)}</span>` : '';
-    $('files').innerHTML = s ? `<div><div class="fh">✏️ Edited — ${s.files.edited.length} file${s.files.edited.length === 1 ? '' : 's'}</div><div class="fl ed">${s.files.edited.slice(-12).reverse().map((p) => `<span title="${esc(p)}">${esc(base(p))}</span>`).join('') || '<span>none yet</span>'}</div></div><div><div class="fh">📖 Read — ${s.files.read.length} file${s.files.read.length === 1 ? '' : 's'}</div><div class="fl">${s.files.read.slice(-12).reverse().map((p) => `<span title="${esc(p)}">${esc(base(p))}</span>`).join('') || '<span>none yet</span>'}</div></div>` : '';
-    $('feed').innerHTML = s ? s.feed.map((f) => `<div class="item ${f.kind || ''}" data-id="${f.id}"><span class="e">${f.running ? '⏳' : f.emoji}</span><span class="t">${f.tool ? `<b>${esc(f.tool)}</b> ` : ''}${esc(plain(f.text))}</span><span class="m">${f.ms != null ? f.ms + 'ms · ' : ''}${ago(f.t)}</span>${f.diff && open.has(f.id) ? diffHtml(f.diff, 30) : ''}</div>`).join('') : '';
+    setHtml($('chips'), s ? `<span class="chip">🧠 ${fmt(s.ctx.used)} / ${fmt(s.ctx.max)}</span><span class="chip">📖 ${s.stats.reads} reads</span><span class="chip">✏️ ${s.stats.edits} edits</span><span class="chip">💻 ${s.stats.cmds} cmds</span><span class="chip">🛠️ ${s.stats.other} other</span><span class="chip proj">${esc(s.project)}</span>` : '');
+    setHtml($('files'), s ? `<div><div class="fh">✏️ Edited — ${s.files.edited.length} file${s.files.edited.length === 1 ? '' : 's'}</div><div class="fl ed">${s.files.edited.slice(-12).reverse().map((p) => `<span title="${esc(p)}">${esc(base(p))}</span>`).join('') || '<span>none yet</span>'}</div></div><div><div class="fh">📖 Read — ${s.files.read.length} file${s.files.read.length === 1 ? '' : 's'}</div><div class="fl">${s.files.read.slice(-12).reverse().map((p) => `<span title="${esc(p)}">${esc(base(p))}</span>`).join('') || '<span>none yet</span>'}</div></div>` : '');
+    setHtml($('feed'), s ? s.feed.map((f) => `<div class="item ${f.kind || ''}" data-id="${f.id}"><span class="e">${f.running ? '⏳' : f.emoji}</span><span class="t">${f.tool ? `<b>${esc(f.tool)}</b> ` : ''}${esc(plain(f.text))}</span><span class="m">${f.ms != null ? f.ms + 'ms · ' : ''}${ago(f.t)}</span>${f.diff && open.has(f.id) ? diffHtml(f.diff, 30) : ''}</div>`).join('') : '');
     $('feed').querySelectorAll('.item').forEach((el) => (el.onclick = () => { const id = +el.dataset.id; open.has(id) ? open.delete(id) : open.add(id); render(); }));
   }
 
-  // model picker (opened by clicking the buddy)
+  // model picker (opened by clicking the buddy): family tabs, then every version Claude Code offers
   $('picker').hidden = !picker || !s;
   if (picker && s) {
-    const cur = s.pickedModel || famOf(s.model);
-    $('picker').innerHTML = `<div class="ph">Switch model for <b>${esc(s.project)}</b></div>` + Object.entries(FAMILIES).map(([k, f]) => `<button data-f="${k}" class="${cur === k ? 'on' : ''}" style="--c:${f.c}"><i></i><span class="nm">${f.name}</span><span class="sm">${cur === k ? '✓ in use' : '/model ' + f.arg}</span></button>`).join('') + `<div class="ph">${s.tmux || s.canType ? 'Sent to your tmux pane when Claude is idle.' : 'Copies the /model command — paste it into Claude Code.'}</div>`;
-    $('picker').querySelectorAll('button').forEach((b) => (b.onclick = () => { hud.send('pickModel', { sessionId: s.id, family: b.dataset.f, arg: FAMILIES[b.dataset.f].arg }); picker = false; render(); }));
+    const curFam = s.pickedModel || famOf(s.model);
+    if (!pickFam || !MODELS[pickFam]) pickFam = curFam || 'sonnet';
+    const curId = s.pickedId || s.model || '';
+    const tabs = Object.entries(FAMILIES).map(([k, f]) => `<button class="ft ${pickFam === k ? 'on' : ''}" data-fam="${k}" style="--c:${f.c}"><i></i>${f.name}${curFam === k ? ' ✓' : ''}</button>`).join('');
+    const f = FAMILIES[pickFam];
+    const rows = [[`${f.name} · latest`, f.arg, 1, true]].concat(MODELS[pickFam].map(([n, id, m1]) => [n, id, m1, false])).map(([n, id, m1, alias]) => {
+      const arg = id + (pick1m && m1 && !alias ? '[1m]' : '');
+      const inUse = alias ? false : !!curId && sameModel(curId, id);
+      return `<button class="mrow ${inUse ? 'on' : ''}" data-arg="${arg}" data-name="${esc(n)}" style="--c:${f.c}"><span class="nm">${esc(n)}${alias ? '' : pick1m && m1 ? ' · 1M' : ''}</span><span class="sm">${inUse ? '✓ in use' : '/model ' + arg}</span></button>`;
+    }).join('');
+    setHtml($('picker'), `<div class="ph">Switch model for <b>${esc(s.project)}</b></div><div class="ftabs">${tabs}</div><div class="mlist">${rows}</div><label class="m1"><input type="checkbox" id="pick1m" ${pick1m ? 'checked' : ''}> 1M context variants</label><div class="ph">${s.tmux ? 'Typed into your tmux pane when Claude is idle.' : 'Copies the /model command: paste it into Claude Code.'} Availability depends on your plan.</div>`);
+    $('picker').querySelectorAll('.ft').forEach((b) => (b.onclick = () => { pickFam = b.dataset.fam; render(); }));
+    $('pick1m').onchange = (e) => { pick1m = e.target.checked; render(); };
+    $('picker').querySelectorAll('.mrow').forEach((b) => (b.onclick = () => {
+      hud.send('pickModel', { sessionId: s.id, family: pickFam, arg: b.dataset.arg, label: b.dataset.name });
+      picker = false; render();
+    }));
   }
 
   // onboarding / empty states
   const ob = $('onboard');
   if (state.hooksInstalled === false) {
     ob.hidden = false;
-    ob.innerHTML = `<div class="h">👋 <span>Hi! I’m your Claude Code buddy</span></div><div class="sub" style="font-family:inherit">Connect me so I can show what Claude is doing. This adds a few hooks to <code>~/.claude/settings.json</code> (backup saved, removable any time).</div><div class="btnRow"><button class="primary" id="obInstall">Connect to Claude Code</button></div>`;
+    setHtml(ob, `<div class="h">👋 <span>Hi! I’m your Claude Code buddy</span></div><div class="sub" style="font-family:inherit">Connect me so I can show what Claude is doing. This adds a few hooks to <code>~/.claude/settings.json</code> (backup saved, removable any time).</div><div class="btnRow"><button class="primary" id="obInstall">Connect to Claude Code</button></div>`);
     $('obInstall').onclick = () => hud.send('installHooks');
   } else if (!ss.length) {
     ob.hidden = false;
-    ob.innerHTML = `<div class="h">😴 <span>Waiting for Claude Code…</span></div><div class="sub" style="font-family:inherit">Start <code>claude</code> in a terminal and I’ll wake up. New sessions only; restart any that were already running.</div>`;
+    setHtml(ob, `<div class="h">😴 <span>Waiting for Claude Code…</span></div><div class="sub" style="font-family:inherit">Start <code>claude</code> in a terminal and I’ll wake up. New sessions only; restart any that were already running.</div>`);
   } else ob.hidden = true;
 
   // reply bubble (auto when Claude waits, or in drawer)
@@ -233,3 +264,5 @@ setInterval(render, 1500);
 render();
 
 if (location.search.includes('promo') || location.search.includes('dance')) { const s = document.createElement('script'); s.src = location.search.includes('dance') ? 'dance.js' : 'promo.js'; document.body.appendChild(s); }
+
+addEventListener('keydown', (e) => { if (e.key === 'Escape' && (picker || drawer)) { picker = false; drawer = false; render(); } });

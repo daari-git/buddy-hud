@@ -25,7 +25,7 @@ const stopHolds = new Map(); // sessionId -> res
 const queued = new Map(); // sessionId -> [text]
 let settings = { replyMode: false, ctxMax: 200000, scale: 1, privacy: false, pos: null };
 try { settings = { ...settings, ...JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8')) }; } catch {}
-let win, hideTimer, seq = 0, pinned = false, hooksCache = { t: 0, v: false };
+let win, hideTimer, seq = 0, pinned = false, userHidden = false, hooksCache = { t: 0, v: false };
 
 const saveSettings = () => {
   try {
@@ -44,13 +44,22 @@ const emojiFor = (t) => TOOL_EMOJI[t] || (t && t.startsWith('mcp__') ? '🔌' : 
 const addUnique = (arr, v, max = 300) => { if (!arr.includes(v)) { arr.push(v); if (arr.length > max) arr.shift(); } };
 const famOf = (m) => ((String(m || '').match(/fable|opus|sonnet|haiku/i) || [''])[0]).toLowerCase();
 
+function clearPickIfApplied(s) {
+  if (!s.pickedId) return;
+  const want = s.pickedId.replace(/\[1m\]$/, '');
+  const norm = (x) => String(x || '').replace(/\[1m\]$/, '').replace(/-v\d+$/, '').replace(/-\d{8}$/, '');
+  const applied = /^(opus|sonnet|haiku)$/.test(want) ? famOf(s.model) === want : (norm(s.model) === want || (want.endsWith('-4-0') && norm(s.model) === want.slice(0, -2)));
+  if (applied || Date.now() - s.pickedAt > 120000) { s.pickedModel = ''; s.pickedId = ''; s.pickedLabel = ''; }
+}
+
 function getSession(id, ev) {
   let s = sessions.get(id);
   if (!s) {
+    userHidden = false; // a brand-new session is worth showing again
     s = {
       id, cwd: ev.cwd || '', project: path.basename(ev.cwd || '') || 'session', model: '',
       status: 'idle', note: '', tool: null, feed: [], ctx: { used: 0, max: settings.ctxMax },
-      stats: { reads: 0, edits: 0, cmds: 0, other: 0 }, files: { read: [], edited: [] }, pickedModel: '', prompt: '', transcript: ev.transcript_path || '',
+      stats: { reads: 0, edits: 0, cmds: 0, other: 0 }, files: { read: [], edited: [] }, pickedModel: '', pickedId: '', pickedLabel: '', pickedAt: 0, prompt: '', transcript: ev.transcript_path || '',
       started: Date.now(), updated: Date.now(),
     };
     sessions.set(id, s);
@@ -133,7 +142,7 @@ function readContext(s) {
       const u = m.message && m.message.usage;
       if (!u) continue;
       s.ctx.used = (u.input_tokens || 0) + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0) + (u.output_tokens || 0);
-      if (m.message.model) { s.model = m.message.model; if (s.pickedModel && famOf(s.model) === s.pickedModel) s.pickedModel = ''; }
+      if (m.message.model) { s.model = m.message.model; clearPickIfApplied(s); }
       break;
     }
   } catch {}
@@ -177,6 +186,7 @@ function handleEvent(ev) {
 
   switch (name) {
     case 'SessionStart':
+      if (ev.model) s.model = ev.model;
       s.status = 'idle'; s.note = ev.source || 'started';
       pushFeed(s, { emoji: '🚀', text: `session ${ev.source || 'start'}`, kind: 'info' });
       break;
@@ -271,6 +281,16 @@ const server = http.createServer((req, res) => {
     const id = ev.session_id || 'unknown';
     const extra = handleEvent(ev);
 
+    if (route === '/permission' && /^(AskUserQuestion|ExitPlanMode)$/.test(ev.tool_name || '')) {
+      // These are conversations, not yes/no permissions: show the buddy asking and let the terminal handle it.
+      const s = getSession(id, ev);
+      const q = ev.tool_name === 'ExitPlanMode' ? 'Plan ready for your review' : ((ev.tool_input && ev.tool_input.questions && ev.tool_input.questions[0] && ev.tool_input.questions[0].question) || 'Claude has a question');
+      s.status = 'waiting'; s.note = clip(q, 200); s.tool = null;
+      pushFeed(s, { emoji: '🙋', text: clip(q, 140), kind: 'ask' });
+      toast(`🙋 ${s.project}`, clip(q, 120));
+      emit();
+      return res.end('{}');
+    }
     if (route === '/permission') {
       const pid = 'p' + ++seq;
       const s = getSession(id, ev);
@@ -336,7 +356,7 @@ function emit() {
     const active = sessions.size > 0;
     clearTimeout(hideTimer);
     if (active) {
-      if (!win.isVisible()) win.showInactive();
+      if (!win.isVisible() && (!userHidden || pendingPerms.size)) win.showInactive();
     } else {
       hideTimer = setTimeout(() => { if (!sessions.size && !pinned && !process.env.HUD_KEEP && hooksInstalled()) win.hide(); }, 15000);
     }
@@ -389,6 +409,7 @@ function createWindow() {
   win.setAlwaysOnTop(true, 'screen-saver');
   win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
+  if (process.env.HUD_DEBUG) win.webContents.on('console-message', (_e, lvl, msg, line, src) => console.log('[renderer]', lvl, msg, src + ':' + line));
   win.webContents.on('did-finish-load', () => {
     win.webContents.setZoomFactor(settings.scale || 1);
     win.webContents.send('state', snapshot());
@@ -453,15 +474,15 @@ ipcMain.on('move', (_e, { dx, dy }) => {
   savePos();
 });
 ipcMain.on('quit', () => app.quit());
-ipcMain.on('hide', () => { pinned = false; win.hide(); });
+ipcMain.on('hide', () => { pinned = false; userHidden = true; win.hide(); });
 ipcMain.on('installHooks', () => {
   try { toast('Buddy HUD', require('./install-hooks').run(false)); } catch (e) { toast('Buddy HUD', 'Hook install failed: ' + e.message); }
   hooksCache.t = 0; emit();
 });
-ipcMain.on('pickModel', (_e, { sessionId, family, arg }) => {
+ipcMain.on('pickModel', (_e, { sessionId, family, arg, label }) => {
   const s = sessions.get(sessionId);
-  if (!s) return;
-  s.pickedModel = family;
+  if (!s || !/^[A-Za-z0-9._\-\[\]]+$/.test(String(arg))) return;
+  s.pickedModel = family; s.pickedId = arg; s.pickedLabel = label || ''; s.pickedAt = Date.now();
   const cmd = `/model ${arg}`;
   if (s.tmux && ['done', 'waiting', 'idle'].includes(s.status)) {
     const base = ['-S', s.tmux.socket];
@@ -477,6 +498,16 @@ ipcMain.on('pickModel', (_e, { sessionId, family, arg }) => {
 });
 
 app.on('second-instance', () => { if (win) { pinned = true; win.showInactive(); emit(); } });
+// drop sessions whose Claude Code process died without sending SessionEnd
+setInterval(() => {
+  let changed = false;
+  for (const [id, s] of sessions) {
+    clearPickIfApplied(s);
+    if (Date.now() - s.updated > 45 * 60 * 1000 && !stopHolds.has(id)) { sessions.delete(id); changed = true; }
+  }
+  if (changed) emit();
+}, 30000);
+
 let tray;
 function buildTray() {
   try {
@@ -484,7 +515,7 @@ function buildTray() {
     tray = new Tray(img.resize({ width: 18, height: 18 }));
   } catch { return; }
   const refresh = () => tray.setContextMenu(Menu.buildFromTemplate([
-    { label: 'Show / hide buddy', click: () => { if (win.isVisible()) { pinned = false; win.hide(); } else { pinned = true; win.showInactive(); } } },
+    { label: 'Show / hide buddy', click: () => { if (win.isVisible()) { pinned = false; userHidden = true; win.hide(); } else { pinned = true; userHidden = false; win.showInactive(); } } },
     { label: 'Install Claude Code hooks', click: () => { try { toast('Buddy HUD', require('./install-hooks').run(false)); } catch (e) { toast('Buddy HUD', 'Hook install failed: ' + e.message); } } },
     { label: 'Remove Claude Code hooks', click: () => { try { toast('Buddy HUD', require('./install-hooks').run(true)); } catch (e) { toast('Buddy HUD', 'Hook removal failed: ' + e.message); } } },
     { label: 'Start at login', type: 'checkbox', checked: app.getLoginItemSettings().openAtLogin, click: (i) => { app.setLoginItemSettings({ openAtLogin: i.checked }); refresh(); } },
@@ -493,7 +524,7 @@ function buildTray() {
   ]));
   refresh();
   tray.setToolTip('Buddy HUD');
-  tray.on('click', () => { if (win.isVisible()) { pinned = false; win.hide(); } else { pinned = true; win.showInactive(); } });
+  tray.on('click', () => { if (win.isVisible()) { pinned = false; userHidden = true; win.hide(); } else { pinned = true; userHidden = false; win.showInactive(); } });
 }
 
 app.whenReady().then(async () => {

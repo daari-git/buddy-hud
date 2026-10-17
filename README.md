@@ -48,7 +48,7 @@ Then restart any running Claude Code session.
 
 ## Switching models
 
-Click the buddy and choose a model. Claude Code has no external API for changing a running session's model, so Buddy HUD uses its `/model` command: inside tmux and idle it types the command for you, otherwise it copies it to your clipboard to paste. The buddy changes colour straight away and confirms once Claude's next reply reports the new model.
+Click the buddy, pick a family (Fable, Opus, Sonnet, Haiku), then any version Claude Code offers (for example Opus 5.5 down to 4, Sonnet 5.5 to 4, with optional 1M-context variants). Availability depends on your plan. Claude Code has no external API for changing a running session's model, so Buddy HUD uses its `/model` command: inside tmux and idle it types the command for you, otherwise it copies it to your clipboard to paste. The buddy changes colour straight away and confirms once Claude's next reply reports the new model.
 
 ## How it works
 

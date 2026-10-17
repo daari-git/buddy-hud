@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.1
+
+- Model picker lists every version per family, like `/model`, with a 1M toggle; fixes wrong version labels and false "in use" marks.
+- Fixed clicks being swallowed by re-renders, scroll resets, and missing slim scrollbars.
+- AskUserQuestion and plan approval are no longer shown as Allow/Deny; the buddy asks and the terminal answers.
+- Hide stays hidden until a new session or a permission request; stale sessions are pruned; Esc closes menus.
+
 ## 0.1.0
 
 - Animated pixel buddy reacting to tool use: typing, reading, searching, thinking, waiting for you, asleep.
