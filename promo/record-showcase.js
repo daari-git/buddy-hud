@@ -48,7 +48,7 @@ const endTool = (kind) => { S.tool = null; S.status = 'thinking'; if (S.feed[0])
   // ---------- showcase: 3D, looks, model colours, walking ----------
   const portrait = mode === 'portrait';
   const Z = portrait ? 2.55 : 2.3;
-  await js(`window.__zoom3d = ${Z}; __layout({ zoom: ${Z}, right: ${portrait ? 40 : 160}, bottom: ${portrait ? 300 : 130}, term: true })`);
+  await js(`window.__zoom3d = ${Z}; __layout({ zoom: ${Z}, right: ${portrait ? 40 : 160}, bottom: ${portrait ? 175 : 130}, term: true })`);
   let skin = '3d';
   const snap2 = () => ({ ...snap(), settings: { replyMode: false, ctxMax: 200000, skin, walk: true } });
   const push2 = () => js(`__push(${JSON.stringify(snap2())})`);
@@ -91,7 +91,7 @@ const endTool = (kind) => { S.tool = null; S.status = 'thinking'; if (S.feed[0])
 
   // walking
   await cap('When Claude rests, it <em>strolls</em> your screen 🚶');
-  const far = portrait ? -560 : -900;
+  const far = Math.round((portrait ? -520 : -420) / Z); // CSS zoom scales the translate too
   await js(`__ui({ pet: { phase: 'walk', dir: -1 } }); __walkStage(${far}, 2100)`);
   await at(26.2);
   await js(`__ui({ pet: { phase: 'walk', dir: 1 } }); __walkStage(0, 2100)`);

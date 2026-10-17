@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.1
+
+- Fix: after switching from 3D to another look, the 3D buddy stayed on screen next to the new one.
+
 ## 0.4.0
 
 - New **3D (beta)** look built with Three.js: soft-voxel body, lighting, turns toward its walking direction, real props (keyboard, book, magnifier), blinking eyes and all expressions.
