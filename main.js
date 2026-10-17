@@ -730,6 +730,7 @@ function buildTray() {
   tray.on('click', () => { if (win.isVisible()) { pinned = false; userHidden = true; win.hide(); } else { pinned = true; userHidden = false; win.showInactive(); } });
 }
 
+app.setAppUserModelId('dev.buddyhud.app'); // Windows toast notifications need an app id
 app.whenReady().then(async () => {
   Menu.setApplicationMenu(null);
   if (isMac && app.dock) app.dock.hide();
