@@ -246,3 +246,14 @@ body.privacy .sub, body.privacy .diff, body.privacy .say, body.privacy #feed .t,
 
 #perms { max-height: 60vh; overflow-y: auto; }
 #perms::-webkit-scrollbar { width: 6px; }
+
+/* details panel: capped to the screen, scrolls, always has a close button */
+#drawer { max-height: var(--maxdrawer, 560px); overflow-y: auto; }
+#dhead { position: sticky; top: -10px; z-index: 2; display: flex; align-items: center; margin: -10px -12px 6px; padding: 8px 12px; background: var(--glass); backdrop-filter: blur(18px); border-radius: 18px 18px 0 0; }
+#dhead b { font-size: 13px; }
+#dhead .grow { flex: 1; }
+#dhead button { padding: 2px 9px; border-radius: 8px; }
+#phoneBox { flex-wrap: wrap; }
+#phoneBox .stat { width: 100%; font-size: 12px; }
+#phoneBox .tip { width: 100%; font-size: 11.5px; color: var(--dim); }
+#phoneBox .tip code { font: 11px ui-monospace, monospace; background: rgba(255,255,255,.08); padding: 1px 5px; border-radius: 5px; user-select: text; word-break: break-all; }

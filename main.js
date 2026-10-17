@@ -597,9 +597,19 @@ ipcMain.on('openDiff', (_e, id) => {
 // ---------- phone access (opt-in, LAN only, token protected) ----------
 let phoneServer = null, phoneQr = '';
 const phoneFails = new Map();
-const lanIp = () => { for (const list of Object.values(os.networkInterfaces())) for (const i of list || []) if (i.family === 'IPv4' && !i.internal) return i.address; return '127.0.0.1'; };
+// The address a phone can actually reach: skip Docker/VM/virtual bridges, prefer Wi-Fi/Ethernet and private ranges.
+const lanIp = () => {
+  const cands = [];
+  for (const [name, list] of Object.entries(os.networkInterfaces())) {
+    if (/^(lo|docker|br-|veth|virbr|vmnet|vboxnet|utun|awdl|llw|tailscale|zt)/i.test(name)) continue;
+    for (const i of list || []) if (i.family === 'IPv4' && !i.internal) cands.push({ name, ip: i.address, score: (/^(wl|wi|en|eth)/i.test(name) ? 2 : 0) + (/^(192\.168\.|10\.|172\.(1[6-9]|2\d|3[01])\.)/.test(i.address) ? 1 : 0) });
+  }
+  cands.sort((a, b) => b.score - a.score);
+  return cands.length ? cands[0].ip : '127.0.0.1';
+};
+let phoneSeenAt = 0;
 function phoneUrl() { return `http://${lanIp()}:47801/?t=${settings.phone.token}`; }
-function phoneInfo() { return settings.phone && settings.phone.enabled ? { enabled: true, url: phoneUrl(), qr: phoneQr } : { enabled: false }; }
+function phoneInfo() { return settings.phone && settings.phone.enabled ? { enabled: true, url: phoneUrl(), qr: phoneQr, ip: lanIp(), seenAt: phoneSeenAt, platform: process.platform } : { enabled: false }; }
 function tokenOk(t) {
   const a = Buffer.from(String(t || '')), b = Buffer.from(String(settings.phone.token));
   return a.length === b.length && crypto.timingSafeEqual(a, b);
@@ -617,6 +627,7 @@ function startPhone() {
     if (Date.now() - fails.t > 60000) { fails.n = 0; fails.t = Date.now(); }
     if (fails.n >= 10) { res.statusCode = 429; return res.end('too many attempts'); }
     if (!tokenOk(u.searchParams.get('t'))) { fails.n++; phoneFails.set(ip, fails); res.statusCode = 403; return res.end('forbidden'); }
+    if (u.pathname === '/' || u.pathname === '/api/state') { const first = !phoneSeenAt; phoneSeenAt = Date.now(); if (first) emit(); }
     const json = (o) => { res.setHeader('Content-Type', 'application/json'); res.setHeader('Cache-Control', 'no-store'); res.end(JSON.stringify(o)); };
     if (req.method === 'GET' && u.pathname === '/') { res.setHeader('Content-Type', 'text/html; charset=utf-8'); return res.end(fs.readFileSync(path.join(__dirname, 'renderer', 'phone.html'))); }
     if (req.method === 'GET' && u.pathname === '/api/state') {

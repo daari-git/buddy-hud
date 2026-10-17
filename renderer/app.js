@@ -106,6 +106,7 @@ $('optSkin').onchange = (e) => hud.send('set', { skin: e.target.value });
 $('optPhone').onchange = (e) => hud.send('phone', { enabled: e.target.checked });
 $('optPrivacy').onchange = (e) => hud.send('set', { privacy: e.target.checked });
 $('btnHide').onclick = () => hud.send('hide');
+$('btnClose').onclick = () => { drawer = false; render(); };
 for (const [id, key] of [['alNotify', 'notify'], ['alSound', 'sound'], ['alDone', 'done'], ['alAsk', 'ask'], ['alStuck', 'stuck'], ['alDnd', 'dnd']])
   $(id).onchange = (e) => { hud.send('set', { alerts: { [key]: e.target.checked } }); if (key === 'sound' && e.target.checked) chime('done'); };
 hud.onRefit(() => { lastFit = ''; fit(); });
@@ -174,6 +175,8 @@ function render() {
   const label = s ? (modelLabel(s.model) || th.name) : '';
   $('modelTag').hidden = !s; $('modelTag').querySelector('span').textContent = label;
 
+  const zoom = (state.settings && state.settings.scale) || 1;
+  document.documentElement.style.setProperty('--maxdrawer', Math.max(220, Math.floor(screen.availHeight / zoom - 330)) + 'px');
   const svg = $('clawd');
   svg.dataset.skin = (state.settings && state.settings.skin) || 'bot';
   svg.dataset.act = a.act; svg.dataset.eyes = a.eyes; svg.dataset.look = a.look;
@@ -234,7 +237,9 @@ function render() {
     const ph = state.phone || {};
     $('optPhone').checked = !!ph.enabled;
     $('phoneBox').hidden = !ph.enabled;
-    setHtml($('phoneBox'), ph.enabled ? `${ph.qr ? `<img alt="QR" src="${ph.qr}">` : ''}<div><div class="url">${esc(ph.url)}</div><div class="warn">Anyone on this Wi-Fi who has this link can approve commands. Use only on networks you trust. <button class="linkbtn" id="phoneNew">New link</button></div></div>` : '');
+    const subnet = ph.ip ? ph.ip.split('.').slice(0, 3).join('.') + '.0/24' : '192.168.1.0/24';
+    const tip = ph.platform === 'linux' ? `Can't connect? Your firewall may block port 47801. Run: <code>sudo ufw allow from ${subnet} to any port 47801 proto tcp</code>` : ph.platform === 'darwin' ? `Can't connect? Allow incoming connections for Buddy HUD in System Settings → Network → Firewall.` : `Can't connect? Allow Buddy HUD through Windows Defender Firewall on private networks.`;
+    setHtml($('phoneBox'), ph.enabled ? `${ph.qr ? `<img alt="QR" src="${ph.qr}">` : ''}<div style="flex:1"><div class="url">${esc(ph.url)}</div><div class="warn">Anyone on this Wi-Fi who has this link can approve commands. Use only on networks you trust. <button class="linkbtn" id="phoneNew">New link</button></div></div><div class="stat">${ph.seenAt ? '✅ Phone connected' : '⏳ Waiting for your phone to open the link…'}</div><div class="tip">Your phone must be on the same Wi-Fi as this computer (${esc(ph.ip || '')}). ${tip}</div>` : '');
     if ($('phoneNew')) $('phoneNew').onclick = () => hud.send('phone', { enabled: true, regenerate: true });
     // usage
     const u = s && s.usage, dd = state.daily;
@@ -291,7 +296,7 @@ new ResizeObserver(fit).observe($('stage'));
 
 hud.onState((s) => { state = s; render(); });
 window.__push = (s) => { state = s; render(); };
-window.__ui = (o) => { if (o.set) hud.send('set', o.set); if ('drawer' in o) drawer = o.drawer; render(); };
+window.__ui = (o) => { if (o.set) hud.send('set', o.set); if ('drawer' in o) drawer = o.drawer; render(); if (o.click) { const el = document.querySelector(o.click); if (el) el.click(); } };
 setInterval(render, 1500);
 render();
 
