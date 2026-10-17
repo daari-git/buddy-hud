@@ -22,7 +22,10 @@
     "electron-builder": "^26.15.3"
   },
   "productName": "Buddy HUD",
-  "author": "samir-kumal",
+  "author": {
+    "name": "premanand8800",
+    "email": "premanand8800@users.noreply.github.com"
+  },
   "keywords": [
     "claude-code",
     "claude",
@@ -61,7 +64,8 @@
       "icon": "build/icon.png",
       "executableArgs": [
         "--no-sandbox"
-      ]
+      ],
+      "maintainer": "premanand8800 <premanand8800@users.noreply.github.com>"
     },
     "mac": {
       "target": [
