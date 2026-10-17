@@ -14,11 +14,12 @@ try {
 
 if (renderer) {
   const W = host.clientWidth || 160, H = host.clientHeight || 150;
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  renderer.setPixelRatio(Math.min((window.devicePixelRatio || 1) * (window.__zoom3d || 1), 4)); // __zoom3d: promo videos scale the stage up
   renderer.setSize(W, H);
   renderer.setClearColor(0x000000, 0);
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.domElement.id = 'buddy3d';
+  renderer.domElement.style.display = ''; // three sets display:block inline, which would beat the CSS that hides it for other looks
   host.appendChild(renderer.domElement);
 
   const scene = new THREE.Scene();
@@ -104,7 +105,8 @@ if (renderer) {
   const col = new THREE.Color(), col2 = new THREE.Color();
 
   const ease = (cur, target, k) => cur + (target - cur) * k;
-  let yaw = 0, last = 0, t0 = performance.now();
+  const clock = () => (window.__vnow ? window.__vnow() : performance.now()); // promo recorder supplies virtual time
+  let yaw = 0, last = 0, t0 = clock();
 
   // A timer, not requestAnimationFrame: rAF keeps the compositor redrawing the transparent window at 60 Hz
   // even on frames we skip. 8 fps when calm, 30 fps when moving.
@@ -117,7 +119,7 @@ if (renderer) {
     if (asleep && !dirty && settle <= 0) return;
     if (asleep) settle--; else settle = 12; // let poses ease into the sleeping position before freezing
     dirty = false;
-    const now = performance.now();
+    const now = clock();
     const dt = Math.min(0.1, (now - last) / 1000); last = now;
     const t = (now - t0) / 1000;
     const k = 1 - Math.pow(0.001, dt); // frame-rate independent smoothing

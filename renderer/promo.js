@@ -4,6 +4,7 @@ document.body.classList.add('promo');
 (() => {
   let vt = 0; const base = Date.now(); const timers = []; const starts = new WeakMap();
   Date.now = () => base + vt;
+  window.__vnow = () => vt;
   window.setTimeout = (fn, ms = 0) => { timers.push({ t: vt + ms, fn }); };
   window.__tick = (t) => {
     vt = t;
@@ -71,3 +72,17 @@ window.__title = (h, p, tag) => {
   t.classList.toggle('on', !!h);
 };
 window.__type = (text) => { const i = document.getElementById('replyInput'); i.value = text; i.dispatchEvent(new Event('input')); };
+
+// showcase helpers: bigger buddy, optional terminal, walking the stage across the frame
+window.__layout = (o) => {
+  const st = document.getElementById('stage');
+  if (o.zoom) st.style.zoom = o.zoom;
+  if ('right' in o) st.style.right = o.right + 'px';
+  if ('bottom' in o) st.style.bottom = o.bottom + 'px';
+  if ('term' in o) document.getElementById('term').style.display = o.term ? '' : 'none';
+};
+window.__walkStage = (px, ms) => {
+  const st = document.getElementById('stage');
+  st.style.transition = `translate ${ms}ms linear`;
+  st.style.translate = px + 'px 0';
+};
