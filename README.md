@@ -32,7 +32,7 @@ Click the buddy (or the pill) for history, files and settings. Drag it anywhere.
 
 ## Install
 
-Download the installer for your system from the Releases page:
+Download the installer for your system from the [Releases page](https://github.com/premanand8800/buddy-hud/releases):
 
 | OS | File |
 |---|---|
@@ -45,7 +45,7 @@ On first launch Buddy HUD asks to add its hooks to `~/.claude/settings.json` (a 
 ### From source
 
 ```bash
-git clone https://github.com/OWNER/buddy-hud && cd buddy-hud
+git clone https://github.com/premanand8800/buddy-hud && cd buddy-hud
 npm install
 npm start          # run the app
 npm run hooks      # add the Claude Code hooks (npm run hooks:remove to undo)
