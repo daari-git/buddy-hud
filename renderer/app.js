@@ -45,6 +45,8 @@ function setHtml(el, html) {
 const plain = (s) => String(s ?? '').replace(/\*\*|__|`/g, '').replace(/^#{1,6}\s+/gm, '').replace(/^\s*[-*]\s+/gm, '').replace(/\s*\n\s*/g, ' ');
 const base = (p) => String(p).split(/[\\/]/).pop();
 
+let pet = { phase: null, dir: -1 };
+let lastUi = {};
 let state = { sessions: [], perms: [], settings: {}, hooksInstalled: true };
 
 let selected = null;
@@ -68,6 +70,7 @@ function chime(kind) {
   } catch {}
 }
 hud.onAlert(chime);
+hud.onPet((p) => { pet = p; render(); });
 let seenAt = 0;
 addEventListener('mousemove', () => { if (Date.now() - seenAt > 4000) { seenAt = Date.now(); hud.send('seen'); } });
 // live clocks are filled in by a 1s ticker instead of re-rendering, so buttons never get replaced under the cursor
@@ -102,6 +105,7 @@ $('btnQuit').onclick = () => hud.send('quit');
 $('optReply').onchange = (e) => hud.send('set', { replyMode: e.target.checked });
 $('optCtx').onchange = (e) => hud.send('set', { ctxMax: +e.target.value });
 $('optScale').onchange = (e) => hud.send('set', { scale: +e.target.value });
+$('optWalk').onchange = (e) => hud.send('set', { walk: e.target.checked });
 $('optSkin').onchange = (e) => hud.send('set', { skin: e.target.value });
 $('optPhone').onchange = (e) => hud.send('phone', { enabled: e.target.checked });
 $('optPrivacy').onchange = (e) => hud.send('set', { privacy: e.target.checked });
@@ -121,7 +125,7 @@ function send() {
 const autosize = () => { const t = $('replyInput'); t.style.height = 'auto'; t.style.height = Math.min(t.scrollHeight, 90) + 'px'; t.style.overflowY = t.scrollHeight > 90 ? 'auto' : 'hidden'; };
 $('btnSend').onclick = send;
 $('btnSkip').onclick = () => selected && hud.send('release', selected);
-$('replyInput').addEventListener('input', autosize);
+$('replyInput').addEventListener('input', () => { autosize(); const t = !!$('replyInput').value; if (t !== lastUi.typing) { lastUi = { ...lastUi, typing: t }; hud.send('ui', lastUi); } });
 $('replyInput').addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } });
 
 // ---------- helpers ----------
@@ -137,6 +141,14 @@ function diffHtml(d, max = 14) {
 }
 
 function actFor(s, perms) {
+  // desktop-pet moves win only while Claude doesn't need the buddy for real work
+  if (pet.phase === 'run') return { act: 'run', eyes: 'wide', item: '❗', item2: '', look: '' };
+  if (pet.phase && !perms.length && (!s || ['idle', 'done'].includes(s.status))) {
+    if (pet.phase === 'walk') return { act: 'walk', eyes: 'open', item: '', item2: '', look: '' };
+    if (pet.phase === 'look') return { act: 'look', eyes: 'open', item: '❔', item2: '', look: '' };
+    if (pet.phase === 'sit') return { act: 'sit', eyes: 'happy', item: '🎵', item2: '', look: '' };
+    if (pet.phase === 'sleep') return { act: 'idle', eyes: 'sleep', item: '💤', item2: '', look: '' };
+  }
   if (perms.length) return { act: 'wait', eyes: 'wide', item: '❗', item2: '', look: '' };
   if (!s) return { act: 'idle', eyes: 'sleep', item: '💤', item2: '', look: '' };
   if (s.tool) {
@@ -178,6 +190,7 @@ function render() {
   const zoom = (state.settings && state.settings.scale) || 1;
   document.documentElement.style.setProperty('--maxdrawer', Math.max(220, Math.floor(screen.availHeight / zoom - 330)) + 'px');
   const svg = $('clawd');
+  svg.style.setProperty('--dir', String(pet.dir || 1));
   svg.dataset.skin = (state.settings && state.settings.skin) || 'bot';
   svg.dataset.act = a.act; svg.dataset.eyes = a.eyes; svg.dataset.look = a.look;
   $('item').textContent = a.item; $('item2').textContent = a.item2;
@@ -211,7 +224,9 @@ function render() {
   } else if (s && !perms.length) {
     const last = s.feed.find((f) => f.kind === 'tool' && !f.running);
     const recent = last && Date.now() - (last.t + (last.ms || 0)) < 3500;
-    if (s.status === 'done') {
+    if (s.status === 'done' && Date.now() - s.updated > 30000) {
+      html = '';
+    } else if (s.status === 'done') {
       const sm = s.summary;
       const sumHtml = sm ? `<div class="sum">${sm.away ? `<span class="away">While you were away (${dur(sm.ms)})</span>` : ''}<span class="pillx">⏱ ${dur(sm.ms)}</span>${sm.edited.slice(0, 6).map((p) => `<span class="pillx" data-open="${esc(p)}" title="${esc(p)}">✏️ ${esc(base(p))}</span>`).join('')}${sm.edited.length > 6 ? `<span class="pillx">+${sm.edited.length - 6} more</span>` : ''}<span class="pillx">📖 ${sm.reads} read</span><span class="pillx">💻 ${sm.cmds} cmd${sm.cmds === 1 ? '' : 's'}</span>${sm.errors ? `<span class="pillx bad">⚠️ ${sm.errors} error${sm.errors === 1 ? '' : 's'}</span>` : ''}</div>` : '';
       html = `<div class="h">💬 <span>Claude</span></div>${sumHtml}${s.lastMsg ? `<div class="say">${md(s.lastMsg)}</div>` : ''}`;
@@ -233,6 +248,8 @@ function render() {
     $('optCtx').value = String(state.settings.ctxMax || 200000);
     $('optScale').value = String(state.settings.scale || 1);
     $('optPrivacy').checked = !!state.settings.privacy;
+    $('optWalk').checked = state.settings.walk !== false;
+    setHtml($('lastmsg'), s && s.lastMsg ? `<div class="fh">💬 Claude’s last message</div><div class="say">${md(s.lastMsg)}</div>` : '');
     $('optSkin').value = (state.settings && state.settings.skin) || 'bot';
     const ph = state.phone || {};
     $('optPhone').checked = !!ph.enabled;
@@ -282,6 +299,8 @@ function render() {
   $('replyHint').textContent = can ? '🟢 Claude is waiting — reply goes straight into the session' : idle && s.canType ? '⌨️ typed into your tmux pane' : '📬 queued — delivered at Claude’s next step (type in terminal if idle)';
   $('btnSkip').hidden = !can;
 
+  const ui = { drawer, typing: document.activeElement === $('replyInput') && !!$('replyInput').value };
+  if (ui.drawer !== lastUi.drawer || ui.typing !== lastUi.typing) { lastUi = ui; hud.send('ui', ui); }
   tickClock();
   requestAnimationFrame(fit);
 }
@@ -294,9 +313,9 @@ function fit() {
 }
 new ResizeObserver(fit).observe($('stage'));
 
-hud.onState((s) => { state = s; render(); });
+hud.onState((s) => { state = s; if (s.pet) pet = s.pet; render(); });
 window.__push = (s) => { state = s; render(); };
-window.__ui = (o) => { if (o.set) hud.send('set', o.set); if ('drawer' in o) drawer = o.drawer; render(); if (o.click) { const el = document.querySelector(o.click); if (el) el.click(); } };
+window.__ui = (o) => { if (o.log) console.log('DBG', JSON.stringify({ act: $('clawd').dataset.act, torso: document.querySelector('#clawd .torso').getBoundingClientRect(), mascot: $('mascot').getBoundingClientRect(), dpr: devicePixelRatio, iw: innerWidth, ih: innerHeight, zoom: getComputedStyle(document.documentElement).zoom })); if (o.pet) pet = o.pet; if (o.set) hud.send('set', o.set); if ('drawer' in o) drawer = o.drawer; render(); if (o.click) { const el = document.querySelector(o.click); if (el) el.click(); } };
 setInterval(render, 1500);
 render();
 

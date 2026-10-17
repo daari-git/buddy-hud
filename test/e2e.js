@@ -9,7 +9,7 @@ const { spawn, exec } = require('child_process');
 
 const PORT = 47811;
 const home = fs.mkdtempSync(path.join(os.tmpdir(), 'buddy-e2e-'));
-const env = { ...process.env, HOME: home, USERPROFILE: home, HUD_TEST: '1', HUD_PHONE: '1', BUDDY_PORT: String(PORT), XDG_SESSION_TYPE: 'x11' };
+const env = { ...process.env, HOME: home, USERPROFILE: home, HUD_TEST: '1', HUD_PHONE: '1', BUDDY_PHONE_PORT: '47813', BUDDY_PORT: String(PORT), XDG_SESSION_TYPE: 'x11' };
 process.env.HOME = home; process.env.USERPROFILE = home; process.env.BUDDY_PORT = String(PORT);
 const { run } = require('../install-hooks');
 run(false); // real installer, into the temp HOME
@@ -111,7 +111,7 @@ const waitFor = async (fn, what, ms = 6000) => { const t = Date.now(); for (;;) 
 
     // phone access: token required, state readable, Allow/Deny works and releases the held hook
     const ph = (method, url, body) => new Promise((resolve, reject) => {
-      const r = http.request({ host: '127.0.0.1', port: 47801, path: url, method, agent: false, headers: { 'Content-Type': 'application/json' } }, (res) => { let o = ''; res.on('data', (d) => (o += d)); res.on('end', () => resolve({ status: res.statusCode, body: o })); });
+      const r = http.request({ host: '127.0.0.1', port: 47813, path: url, method, agent: false, headers: { 'Content-Type': 'application/json' } }, (res) => { let o = ''; res.on('data', (d) => (o += d)); res.on('end', () => resolve({ status: res.statusCode, body: o })); });
       r.on('error', reject); if (body) r.write(body); r.end();
     });
     await waitFor(async () => { try { return (await ph('GET', '/?t=tok123')).status === 200; } catch { return false; } }, 'phone server');

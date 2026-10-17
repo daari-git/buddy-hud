@@ -25,6 +25,7 @@ A floating pixel buddy for [Claude Code](https://claude.com/claude-code). It sit
 - **Full diffs.** "Open full diff" shows the whole change in its own window.
 - **Health indicator.** A dot on the pill: green connected, grey waiting, amber missing hooks or silent, red not installed. Details and a self-test button in the panel and tray.
 - **Phone access (opt-in).** Approve permissions and reply from your phone on the same Wi-Fi. Off by default; see Privacy.
+- **Walks around.** When Claude is idle the buddy strolls along your screen, stops to look around, sits down or naps. When Claude needs you it runs back to the spot where you parked it and waves. Drag it to set its home; turn walking off in settings or the tray.
 - **Looks.** Bot (default), Cat, or Classic (logo homage).
 - **Multiple sessions.** One tab per Claude Code session.
 

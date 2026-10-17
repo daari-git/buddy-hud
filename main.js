@@ -8,6 +8,7 @@ const os = require('os');
 const path = require('path');
 
 const PORT = +process.env.BUDDY_PORT || 47800;
+const PHONE_PORT = +process.env.BUDDY_PHONE_PORT || 47801;
 const HOOK_URL = `127.0.0.1:${PORT}/hook`;
 const HOOK_EVENTS = ['SessionStart', 'SessionEnd', 'UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'Notification', 'SubagentStop', 'PermissionRequest', 'Stop'];
 const TEST = !!process.env.HUD_TEST;
@@ -29,7 +30,7 @@ const sessions = new Map(); // id -> session
 const pendingPerms = new Map(); // id -> { res, sessionId, tool, summary, diff }
 const stopHolds = new Map(); // sessionId -> res
 const queued = new Map(); // sessionId -> [text]
-const DEFAULTS = { phone: { enabled: false, token: '' }, replyMode: false, ctxMax: 200000, scale: 1, privacy: false, pos: null, skin: 'bot', alerts: { notify: true, sound: true, done: true, ask: true, stuck: true, dnd: false } };
+const DEFAULTS = { walk: true, phone: { enabled: false, token: '' }, replyMode: false, ctxMax: 200000, scale: 1, privacy: false, pos: null, skin: 'bot', alerts: { notify: true, sound: true, done: true, ask: true, stuck: true, dnd: false } };
 let settings = { ...DEFAULTS };
 try { const saved = JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8')); settings = { ...DEFAULTS, ...saved, alerts: { ...DEFAULTS.alerts, ...(saved.alerts || {}) } }; } catch {}
 const DAILY_FILE = path.join(os.homedir(), '.buddy-hud', 'daily.json');
@@ -454,7 +455,7 @@ function runSelfTest() {
 
 function snapshot() {
   return {
-    settings: { ...settings, phone: undefined }, phone: phoneInfo(), hooksInstalled: hooksInstalled(), health: computeHealth(), selfTest, daily: dailyTotals(), version: app.getVersion(),
+    pet: { phase: pet.phase, dir: pet.dir }, settings: { ...settings, phone: undefined }, phone: phoneInfo(), hooksInstalled: hooksInstalled(), health: computeHealth(), selfTest, daily: dailyTotals(), version: app.getVersion(),
     sessions: [...sessions.values()].sort((a, b) => b.updated - a.updated).map((s) => ({
       ...s, _usageState: undefined, usage: s._usage || null, canReply: stopHolds.has(s.id), canType: !!s.tmux, queued: (queued.get(s.id) || []).length,
     })),
@@ -492,7 +493,6 @@ function fit(w, h) {
   x = Math.max(disp.x, Math.min(x, disp.x + disp.width - w));
   y = Math.max(disp.y, Math.min(y, disp.y + disp.height - h));
   win.setBounds({ x, y, width: w, height: h });
-  savePos();
 }
 
 let lastFitW = 0;
@@ -608,7 +608,7 @@ const lanIp = () => {
   return cands.length ? cands[0].ip : '127.0.0.1';
 };
 let phoneSeenAt = 0;
-function phoneUrl() { return `http://${lanIp()}:47801/?t=${settings.phone.token}`; }
+function phoneUrl() { return `http://${lanIp()}:${PHONE_PORT}/?t=${settings.phone.token}`; }
 function phoneInfo() { return settings.phone && settings.phone.enabled ? { enabled: true, url: phoneUrl(), qr: phoneQr, ip: lanIp(), seenAt: phoneSeenAt, platform: process.platform } : { enabled: false }; }
 function tokenOk(t) {
   const a = Buffer.from(String(t || '')), b = Buffer.from(String(settings.phone.token));
@@ -653,7 +653,7 @@ function startPhone() {
     res.statusCode = 404; res.end('not found');
   });
   phoneServer.on('error', (e) => { settings.phone.enabled = false; saveSettings(); phoneServer = null; toast('Buddy HUD', 'Phone access could not start: ' + e.code); emit(); });
-  phoneServer.listen(47801, '0.0.0.0', () => emit());
+  phoneServer.listen(PHONE_PORT, '0.0.0.0', () => emit());
 }
 function stopPhone() {
   if (settings.phone) { settings.phone.enabled = false; saveSettings(); }
@@ -672,7 +672,7 @@ ipcMain.on('selfTest', () => runSelfTest());
 ipcMain.on('set', (_e, patch) => {
   if (patch.alerts) patch = { ...patch, alerts: { ...settings.alerts, ...patch.alerts } };
   settings = { ...settings, ...patch };
-  if (patch.alerts) refreshTray();
+  if (patch.alerts || 'walk' in patch) refreshTray();
   saveSettings();
   if (!settings.replyMode) for (const id of [...stopHolds.keys()]) releaseStop(id);
   if ('scale' in patch && win) { win.webContents.setZoomFactor(settings.scale || 1); lastFitW = 0; win.webContents.send('refit'); }
@@ -683,7 +683,10 @@ ipcMain.on('move', (_e, { dx, dy }) => {
   const [x, y] = win.getPosition();
   win.setPosition(Math.round(x + dx), Math.round(y + dy));
   savePos();
+  pet.dragPauseUntil = Date.now() + 15000;
+  if (pet.phase) setPhase(null);
 });
+ipcMain.on('ui', (_e, u) => { uiState = { ...uiState, ...u }; });
 ipcMain.on('quit', () => app.quit());
 ipcMain.on('hide', () => { pinned = false; userHidden = true; win.hide(); });
 ipcMain.on('installHooks', () => {
@@ -709,6 +712,55 @@ setInterval(() => {
   if (changed) emit();
 }, 15000);
 
+// ---------- desktop pet: stroll along the screen while Claude is idle, run home when Claude needs you ----------
+let uiState = { drawer: false, typing: false };
+const pet = { phase: null, dir: -1, until: 0, dragPauseUntil: 0 };
+const rand = (a, b) => a + Math.random() * (b - a);
+function setPhase(phase, ms = 0) {
+  pet.phase = phase; pet.until = Date.now() + ms;
+  if (win && !win.isDestroyed()) win.webContents.send('pet', { phase: pet.phase, dir: pet.dir });
+}
+function needsYou() {
+  return pendingPerms.size > 0 || stopHolds.size > 0 || [...sessions.values()].some((s) => ['waiting', 'permission'].includes(s.status) || (s.status === 'done' && Date.now() - s.updated < 15000));
+}
+function mayWander() {
+  if (!settings.walk || TEST || !win || win.isDestroyed() || !win.isVisible()) return false;
+  if (Date.now() < pet.dragPauseUntil || uiState.drawer || uiState.typing || needsYou()) return false;
+  return ![...sessions.values()].some((s) => ['thinking', 'tool'].includes(s.status));
+}
+function homeX(b) { return settings.pos ? settings.pos.r - b.width : null; }
+setInterval(() => {
+  if (!win || win.isDestroyed() || !win.isVisible()) return;
+  const b = win.getBounds();
+  const wa = screen.getDisplayMatching(b).workArea;
+  // Claude needs you: run back to where the user parked the buddy
+  if (settings.walk && needsYou() && !TEST) {
+    const hx = homeX(b);
+    if (hx !== null && Math.abs(hx - b.x) > 6) {
+      const dir = hx > b.x ? 1 : -1;
+      if (pet.phase !== 'run' || pet.dir !== dir) { pet.dir = dir; setPhase('run'); }
+      win.setPosition(Math.round(b.x + dir * Math.min(10, Math.abs(hx - b.x))), b.y);
+    } else if (pet.phase) setPhase(null);
+    return;
+  }
+  if (!mayWander()) { if (pet.phase) setPhase(null); return; }
+  const now = Date.now();
+  if (!pet.phase || pet.phase === 'run' || now > pet.until) {
+    const idle = !sessions.size;
+    const r = Math.random();
+    if (r < 0.5) { if (Math.random() < 0.45) pet.dir *= -1; setPhase('walk', rand(3500, 8000)); }
+    else if (r < 0.75) setPhase('look', rand(2500, 5000));
+    else if (r < 0.9 || !idle) setPhase('sit', rand(5000, 10000));
+    else setPhase('sleep', rand(15000, 30000));
+  }
+  if (pet.phase === 'walk') {
+    let x = b.x + pet.dir * 2;
+    if (x < wa.x) { x = wa.x; pet.dir = 1; setPhase('walk', pet.until - now); }
+    if (x + b.width > wa.x + wa.width) { x = wa.x + wa.width - b.width; pet.dir = -1; setPhase('walk', pet.until - now); }
+    win.setPosition(Math.round(x), b.y);
+  }
+}, 33);
+
 let tray, refreshTray = () => {};
 function buildTray() {
   try {
@@ -718,6 +770,7 @@ function buildTray() {
   const refresh = () => tray.setContextMenu(Menu.buildFromTemplate([
     { label: 'Show / hide buddy', click: () => { if (win.isVisible()) { pinned = false; userHidden = true; win.hide(); } else { pinned = true; userHidden = false; win.showInactive(); } } },
     { label: 'Install Claude Code hooks', click: () => { try { toast('Buddy HUD', require('./install-hooks').run(false)); } catch (e) { toast('Buddy HUD', 'Hook install failed: ' + e.message); } } },
+    { label: 'Walk around when idle', type: 'checkbox', checked: settings.walk, click: () => { settings.walk = !settings.walk; saveSettings(); refreshTray(); emit(); } },
     { label: 'Run hook self-test', click: () => runSelfTest() },
     { label: 'Do not disturb', type: 'checkbox', checked: settings.alerts.dnd, click: () => { settings.alerts.dnd = !settings.alerts.dnd; saveSettings(); refreshTray(); emit(); } },
     { label: 'Remove Claude Code hooks', click: () => { try { toast('Buddy HUD', require('./install-hooks').run(true)); } catch (e) { toast('Buddy HUD', 'Hook removal failed: ' + e.message); } } },

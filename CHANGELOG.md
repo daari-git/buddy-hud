@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.0
+
+- Desktop pet mode: the buddy walks along the screen while Claude is idle (walk, look around, sit, nap) and runs home when Claude needs you. Dragging sets home; toggle in settings or tray.
+- Finished-message bubble tucks away after 30 s; the full message is in the details panel.
+
 ## 0.2.1
 
 - Release packaging: Intel and Apple Silicon Mac builds, separate Windows installer and portable exe.

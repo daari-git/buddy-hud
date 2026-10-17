@@ -257,3 +257,30 @@ body.privacy .sub, body.privacy .diff, body.privacy .say, body.privacy #feed .t,
 #phoneBox .stat { width: 100%; font-size: 12px; }
 #phoneBox .tip { width: 100%; font-size: 11.5px; color: var(--dim); }
 #phoneBox .tip code { font: 11px ui-monospace, monospace; background: rgba(255,255,255,.08); padding: 1px 5px; border-radius: 5px; user-select: text; word-break: break-all; }
+
+/* ---------- desktop pet moves ---------- */
+#clawd[data-act=walk] .body { animation: walkBob .5s ease-in-out infinite; }
+@keyframes walkBob { 0%, 100% { translate: 0 0; } 50% { translate: 0 -6px; } }
+#clawd[data-act=walk] #legA, #clawd[data-act=run] #legA { animation: stepUp .5s ease-in-out infinite; }
+#clawd[data-act=walk] #legB, #clawd[data-act=run] #legB { animation: stepUp .5s .25s ease-in-out infinite; }
+@keyframes stepUp { 0%, 50%, 100% { translate: 0 0; } 25% { translate: 0 -12px; } }
+#clawd[data-act=walk] #handL { animation: swingA .5s ease-in-out infinite; }
+#clawd[data-act=walk] #handR { animation: swingA .5s .25s ease-in-out infinite; }
+@keyframes swingA { 0%, 100% { translate: 0 6px; } 50% { translate: 0 -6px; } }
+#clawd[data-act=walk] .rig { transform: rotate(calc(var(--dir, 1) * 3deg)); }
+#clawd[data-act=walk] .eyes, #clawd[data-act=run] .eyes { transform: translate(calc(var(--dir, 1) * 9px), 0); }
+#clawd[data-act=run] .body { animation: walkBob .26s ease-in-out infinite; }
+#clawd[data-act=run] #legA { animation-duration: .26s; } #clawd[data-act=run] #legB { animation-duration: .26s; animation-delay: .13s; }
+#clawd[data-act=run] .rig { transform: rotate(calc(var(--dir, 1) * 8deg)); }
+#clawd[data-act=run] #handL, #clawd[data-act=run] #handR { transform: translate(0, -20px); animation: swingA .26s ease-in-out infinite; }
+#clawd[data-act=run] #item { opacity: 1; animation: floaty .3s infinite; }
+#clawd[data-act=look] .eyes { animation: dart 1.4s infinite alternate ease-in-out; }
+#clawd[data-act=look] #handR { transform: translate(-30px, -52px) rotate(-20deg); }
+#clawd[data-act=sit] .leg { transform: scaleY(.3); transform-origin: 50% 0; }
+#clawd[data-act=sit] .body { animation: sitBob 3s ease-in-out infinite; }
+@keyframes sitBob { 0%, 100% { translate: 0 30px; } 50% { translate: 0 28px; } }
+#clawd[data-act=sit] #item, #clawd[data-act=look] #item { opacity: 1; animation: floaty 2s ease-in-out infinite; }
+#lastmsg .say { max-height: 160px; margin-bottom: 6px; }
+#lastmsg .fh { font-size: 12px; color: var(--dim); }
+body[data-act=walk], body[data-act=look], body[data-act=sit] { --glow: #8a7f75; }
+body[data-act=run] { --glow: var(--amber); }
