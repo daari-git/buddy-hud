@@ -2,5 +2,5 @@
 const { spawn } = require('child_process');
 const electron = require('electron');
 const args = ['.'];
-if (process.platform === 'linux') args.push('--no-sandbox');
+if (process.platform === 'linux') args.push('--no-sandbox', '--ozone-platform=x11');
 spawn(electron, args, { stdio: 'inherit', cwd: require('path').join(__dirname, '..') }).on('exit', (c) => process.exit(c ?? 0));

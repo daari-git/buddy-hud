@@ -1,5 +1,5 @@
 const { execFile } = require('child_process');
-const { app, BrowserWindow, ipcMain, screen, Notification, Menu, Tray, nativeImage, dialog } = require('electron');
+const { app, BrowserWindow, ipcMain, screen, Notification, Menu, Tray, nativeImage, dialog, clipboard } = require('electron');
 const http = require('http');
 const fs = require('fs');
 const os = require('os');
@@ -10,8 +10,12 @@ const SETTINGS_FILE = path.join(os.homedir(), '.buddy-hud', 'settings.json');
 const isLinux = process.platform === 'linux';
 const isMac = process.platform === 'darwin';
 
-// Wayland compositors ignore always-on-top for native windows, so run through XWayland on Linux
-if (isLinux) { app.commandLine.appendSwitch('ozone-platform', 'x11'); app.commandLine.appendSwitch('no-sandbox'); }
+// Wayland compositors ignore always-on-top for native windows, so run through XWayland on Linux.
+// The ozone backend is chosen before JS runs, so re-launch once with the flag.
+if (isLinux && process.env.XDG_SESSION_TYPE === 'wayland' && !process.argv.some((a) => a.startsWith('--ozone-platform'))) {
+  app.relaunch({ args: [...process.argv.slice(1), '--ozone-platform=x11'] });
+  app.exit(0);
+}
 if (!app.requestSingleInstanceLock()) app.quit();
 
 // ---------- state ----------
@@ -19,9 +23,9 @@ const sessions = new Map(); // id -> session
 const pendingPerms = new Map(); // id -> { res, sessionId, tool, summary, diff }
 const stopHolds = new Map(); // sessionId -> res
 const queued = new Map(); // sessionId -> [text]
-let settings = { replyMode: false, ctxMax: 200000, mode: 'orb' };
+let settings = { replyMode: false, ctxMax: 200000, scale: 1, privacy: false, pos: null };
 try { settings = { ...settings, ...JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8')) }; } catch {}
-let win, hideTimer, seq = 0;
+let win, hideTimer, seq = 0, pinned = false, hooksCache = { t: 0, v: false };
 
 const saveSettings = () => {
   try {
@@ -37,13 +41,16 @@ const TOOL_EMOJI = {
 };
 const emojiFor = (t) => TOOL_EMOJI[t] || (t && t.startsWith('mcp__') ? '🔌' : '🛠️');
 
+const addUnique = (arr, v, max = 300) => { if (!arr.includes(v)) { arr.push(v); if (arr.length > max) arr.shift(); } };
+const famOf = (m) => ((String(m || '').match(/fable|opus|sonnet|haiku/i) || [''])[0]).toLowerCase();
+
 function getSession(id, ev) {
   let s = sessions.get(id);
   if (!s) {
     s = {
       id, cwd: ev.cwd || '', project: path.basename(ev.cwd || '') || 'session', model: '',
       status: 'idle', note: '', tool: null, feed: [], ctx: { used: 0, max: settings.ctxMax },
-      stats: { reads: 0, edits: 0, cmds: 0, other: 0 }, prompt: '', transcript: ev.transcript_path || '',
+      stats: { reads: 0, edits: 0, cmds: 0, other: 0 }, files: { read: [], edited: [] }, pickedModel: '', prompt: '', transcript: ev.transcript_path || '',
       started: Date.now(), updated: Date.now(),
     };
     sessions.set(id, s);
@@ -126,7 +133,7 @@ function readContext(s) {
       const u = m.message && m.message.usage;
       if (!u) continue;
       s.ctx.used = (u.input_tokens || 0) + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0) + (u.output_tokens || 0);
-      if (m.message.model) s.model = m.message.model;
+      if (m.message.model) { s.model = m.message.model; if (s.pickedModel && famOf(s.model) === s.pickedModel) s.pickedModel = ''; }
       break;
     }
   } catch {}
@@ -149,7 +156,7 @@ function lastAssistantText(s) {
       try { m = JSON.parse(rows[k]); } catch { continue; }
       if (m.type !== 'assistant' || !m.message || !Array.isArray(m.message.content)) continue;
       const text = m.message.content.filter((c) => c.type === 'text').map((c) => c.text).join('\n').trim();
-      if (text) return clip(text, 900);
+      if (text) return clip(text, 2400);
     }
   } catch {}
   return '';
@@ -185,6 +192,9 @@ function handleEvent(ev) {
       const diff = buildDiff(tool, ev.tool_input);
       s.status = 'tool';
       s.tool = { name: tool, emoji: emojiFor(tool), ...sum, diff, started: Date.now() };
+      const fp = (ev.tool_input || {}).file_path || (ev.tool_input || {}).notebook_path;
+      if (fp && tool === 'Read') addUnique(s.files.read, fp);
+      else if (fp && /Edit|Write|Notebook/.test(tool)) addUnique(s.files.edited, fp);
       if (/^Read$|^Grep$|^Glob$/.test(tool)) s.stats.reads++;
       else if (/Edit|Write|Notebook/.test(tool)) s.stats.edits++;
       else if (tool === 'Bash') s.stats.cmds++;
@@ -246,6 +256,8 @@ function toast(title, body) {
 
 // ---------- HTTP bridge ----------
 const server = http.createServer((req, res) => {
+  // browsers always send Origin on cross-site requests; hooks (curl) never do
+  if (req.headers.origin) { res.statusCode = 403; return res.end('{}'); }
   let body = '';
   req.on('data', (d) => (body += d));
   req.on('end', () => {
@@ -288,12 +300,26 @@ const server = http.createServer((req, res) => {
     res.end(extra || '{}');
   });
 });
+server.on('error', (e) => {
+  if (e.code === 'EADDRINUSE') {
+    dialog.showErrorBox('Buddy HUD', `Port ${PORT} is already in use. Is Buddy HUD already running? Quit the other copy and try again.`);
+    app.exit(1);
+  } else throw e;
+});
 server.listen(PORT, '127.0.0.1');
 
 // ---------- window ----------
+function hooksInstalled() {
+  if (Date.now() - hooksCache.t < 4000) return hooksCache.v;
+  let v = false;
+  try { v = fs.readFileSync(path.join(os.homedir(), '.claude', 'settings.json'), 'utf8').includes('127.0.0.1:47800/hook'); } catch {}
+  hooksCache = { t: Date.now(), v };
+  return v;
+}
+
 function snapshot() {
   return {
-    settings,
+    settings, hooksInstalled: hooksInstalled(), version: app.getVersion(),
     sessions: [...sessions.values()].sort((a, b) => b.updated - a.updated).map((s) => ({
       ...s, canReply: stopHolds.has(s.id), canType: !!s.tmux, queued: (queued.get(s.id) || []).length,
     })),
@@ -312,13 +338,14 @@ function emit() {
     if (active) {
       if (!win.isVisible()) win.showInactive();
     } else {
-      hideTimer = setTimeout(() => { if (!sessions.size && !process.env.HUD_KEEP) win.hide(); }, 15000);
+      hideTimer = setTimeout(() => { if (!sessions.size && !pinned && !process.env.HUD_KEEP && hooksInstalled()) win.hide(); }, 15000);
     }
   }, 30);
 }
 
 function fit(w, h) {
   if (!win || win.isDestroyed()) return;
+  w *= settings.scale || 1; h *= settings.scale || 1;
   w = Math.max(160, Math.min(520, Math.ceil(w))); h = Math.max(120, Math.min(900, Math.ceil(h)));
   const b = win.getBounds();
   if (b.width === w && b.height === h) return;
@@ -329,13 +356,32 @@ function fit(w, h) {
   x = Math.max(disp.x, Math.min(x, disp.x + disp.width - w));
   y = Math.max(disp.y, Math.min(y, disp.y + disp.height - h));
   win.setBounds({ x, y, width: w, height: h });
+  savePos();
+}
+
+let lastFitW = 0;
+let posTimer;
+function savePos() {
+  clearTimeout(posTimer);
+  posTimer = setTimeout(() => {
+    if (!win || win.isDestroyed()) return;
+    const b = win.getBounds();
+    settings.pos = { r: b.x + b.width, b: b.y + b.height };
+    saveSettings();
+  }, 400);
 }
 
 function createWindow() {
   const disp = screen.getPrimaryDisplay().workArea;
   const w = 260, h = 190;
+  let startX = disp.x + disp.width - w - 24, startY = disp.y + disp.height - h - 24;
+  if (settings.pos) {
+    const x = settings.pos.r - w, y = settings.pos.b - h;
+    const d = screen.getDisplayNearestPoint({ x, y }).workArea;
+    if (x >= d.x - 20 && y >= d.y - 20 && x + w <= d.x + d.width + 20 && y + h <= d.y + d.height + 20) { startX = x; startY = y; }
+  }
   win = new BrowserWindow({
-    width: w, height: h, x: disp.x + disp.width - w - 24, y: disp.y + disp.height - h - 24,
+    width: w, height: h, x: startX, y: startY,
     frame: false, transparent: true, resizable: false, alwaysOnTop: true, skipTaskbar: true,
     hasShadow: false, show: false, focusable: true, backgroundColor: '#00000000', title: 'Buddy HUD', icon: path.join(__dirname, 'build', 'icon.png'), type: isMac ? 'panel' : undefined,
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true },
@@ -344,8 +390,10 @@ function createWindow() {
   win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
   win.webContents.on('did-finish-load', () => {
+    win.webContents.setZoomFactor(settings.scale || 1);
     win.webContents.send('state', snapshot());
-    if (process.env.HUD_KEEP || sessions.size) win.showInactive();
+    if (process.env.HUD_KEEP || sessions.size || !hooksInstalled()) win.showInactive();
+    if (process.env.HUD_UI) setTimeout(() => win.webContents.executeJavaScript(`__ui(${process.env.HUD_UI})`), 4500);
     if (process.env.HUD_SHOT) setTimeout(async () => {
       const img = await win.webContents.capturePage();
       fs.writeFileSync(process.env.HUD_SHOT, img.toPNG());
@@ -395,16 +443,40 @@ ipcMain.on('set', (_e, patch) => {
   settings = { ...settings, ...patch };
   saveSettings();
   if (!settings.replyMode) for (const id of [...stopHolds.keys()]) releaseStop(id);
+  if ('scale' in patch && win) { win.webContents.setZoomFactor(settings.scale || 1); lastFitW = 0; win.webContents.send('refit'); }
   for (const s of sessions.values()) readContext(s);
   emit();
 });
 ipcMain.on('move', (_e, { dx, dy }) => {
   const [x, y] = win.getPosition();
   win.setPosition(Math.round(x + dx), Math.round(y + dy));
+  savePos();
 });
 ipcMain.on('quit', () => app.quit());
+ipcMain.on('hide', () => { pinned = false; win.hide(); });
+ipcMain.on('installHooks', () => {
+  try { toast('Buddy HUD', require('./install-hooks').run(false)); } catch (e) { toast('Buddy HUD', 'Hook install failed: ' + e.message); }
+  hooksCache.t = 0; emit();
+});
+ipcMain.on('pickModel', (_e, { sessionId, family, arg }) => {
+  const s = sessions.get(sessionId);
+  if (!s) return;
+  s.pickedModel = family;
+  const cmd = `/model ${arg}`;
+  if (s.tmux && ['done', 'waiting', 'idle'].includes(s.status)) {
+    const base = ['-S', s.tmux.socket];
+    execFile('tmux', [...base, 'send-keys', '-t', s.tmux.pane, '-l', cmd], () =>
+      setTimeout(() => execFile('tmux', [...base, 'send-keys', '-t', s.tmux.pane, 'Enter'], () => {}), 120));
+    pushFeed(s, { emoji: '🎛️', text: `switching model: ${cmd}`, kind: 'info' });
+  } else {
+    clipboard.writeText(cmd);
+    toast('Buddy HUD', `Copied "${cmd}". Paste it into Claude Code to switch models.`);
+    pushFeed(s, { emoji: '📋', text: `copied ${cmd} — paste in Claude Code`, kind: 'info' });
+  }
+  emit();
+});
 
-app.on('second-instance', () => { if (win) { win.showInactive(); emit(); } });
+app.on('second-instance', () => { if (win) { pinned = true; win.showInactive(); emit(); } });
 let tray;
 function buildTray() {
   try {
@@ -412,7 +484,7 @@ function buildTray() {
     tray = new Tray(img.resize({ width: 18, height: 18 }));
   } catch { return; }
   const refresh = () => tray.setContextMenu(Menu.buildFromTemplate([
-    { label: 'Show / hide buddy', click: () => (win.isVisible() ? win.hide() : win.showInactive()) },
+    { label: 'Show / hide buddy', click: () => { if (win.isVisible()) { pinned = false; win.hide(); } else { pinned = true; win.showInactive(); } } },
     { label: 'Install Claude Code hooks', click: () => { try { toast('Buddy HUD', require('./install-hooks').run(false)); } catch (e) { toast('Buddy HUD', 'Hook install failed: ' + e.message); } } },
     { label: 'Remove Claude Code hooks', click: () => { try { toast('Buddy HUD', require('./install-hooks').run(true)); } catch (e) { toast('Buddy HUD', 'Hook removal failed: ' + e.message); } } },
     { label: 'Start at login', type: 'checkbox', checked: app.getLoginItemSettings().openAtLogin, click: (i) => { app.setLoginItemSettings({ openAtLogin: i.checked }); refresh(); } },
@@ -421,7 +493,7 @@ function buildTray() {
   ]));
   refresh();
   tray.setToolTip('Buddy HUD');
-  tray.on('click', () => (win.isVisible() ? win.hide() : win.showInactive()));
+  tray.on('click', () => { if (win.isVisible()) { pinned = false; win.hide(); } else { pinned = true; win.showInactive(); } });
 }
 
 app.whenReady().then(async () => {

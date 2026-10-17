@@ -11,11 +11,13 @@
     "dist:linux": "electron-builder --linux",
     "dist:mac": "electron-builder --mac",
     "dist:win": "electron-builder --win",
-    "promo": "electron promo/record.js portrait promo/out.mp4"
+    "promo": "electron promo/record.js portrait promo/out.mp4",
+    "test": "node test/install-hooks.test.js"
   },
   "license": "MIT",
   "devDependencies": {
-    "electron": "^44.8.0"
+    "electron": "^44.8.0",
+    "electron-builder": "^26.15.3"
   },
   "productName": "Buddy HUD",
   "author": "samir-kumal",

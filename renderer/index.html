@@ -9,16 +9,27 @@
 <div id="stage">
   <div id="bubbles">
     <div id="perms"></div>
+    <div id="onboard" class="bubble" hidden></div>
+    <div id="picker" class="bubble" hidden></div>
     <div id="drawer" class="bubble" hidden>
       <div id="tabs"></div>
       <div class="stats" id="chips"></div>
+      <div id="files"></div>
+      <div class="feedHead">Activity</div>
       <div id="feed"></div>
       <div id="settings">
-        <label><input type="checkbox" id="optReply"> 📡 hold turn-end for replies (terminal shows “hook running”)</label>
-        <label>🧠 window
+        <label>Size
+          <select id="optScale"><option value="0.85">Small</option><option value="1">Normal</option><option value="1.25">Large</option></select>
+        </label>
+        <label><input type="checkbox" id="optPrivacy"> 🙈 Privacy (blur paths &amp; code)</label>
+        <label>🧠 Window
           <select id="optCtx"><option value="200000">200k</option><option value="1000000">1M</option></select>
         </label>
-        <button id="btnQuit">⏻ quit</button>
+        <label title="Experimental: the terminal shows 'hook running' while waiting"><input type="checkbox" id="optReply"> 📡 Hold turn-end for replies</label>
+        <span class="grow"></span>
+        <button id="btnHide">Hide</button>
+        <button id="btnQuit">⏻ Quit</button>
+        <span class="ver" id="ver"></span>
       </div>
     </div>
     <div id="action" class="bubble" hidden></div>
@@ -38,8 +49,9 @@
       <span class="pt"><b id="pillPct">0%</b><small id="pillSub">idle</small></span>
     </button>
 
-    <div id="mascot" title="Claude Code">
+    <div id="mascot" title="Click to switch model">
       <div class="shadow"></div>
+      <div id="modelTag"><i></i><span>—</span></div>
       <svg id="clawd" viewBox="-40 -56 240 224" data-act="idle" data-eyes="sleep" data-look="">
         <g class="fx" id="fx">
           <rect x="-34" y="30" width="16" height="4"/><rect x="-40" y="52" width="22" height="4"/><rect x="-34" y="74" width="16" height="4"/>

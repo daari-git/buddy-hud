@@ -12,7 +12,11 @@ A floating pixel buddy for [Claude Code](https://claude.com/claude-code). It sit
 
 - **The buddy reacts to the work.** Typing hands for edits and commands, eyes sweeping for reads, a swinging magnifier for searches, a hand on the head while thinking, a wave when Claude needs you, asleep when idle.
 - **Live diffs.** See the file, the line number and the exact lines Claude is changing.
+- **File counts.** The pill beside the buddy always shows unique files read and edited plus commands run. Open details for the file lists.
+- **Model switcher + theme.** Click the buddy to pick Fable, Opus, Sonnet or Haiku. The buddy and the whole UI change colour to match the model in use (purple Opus, orange Sonnet, teal Haiku, magenta Fable).
 - **Context window.** A ring shows how full the context is.
+- **Readable replies.** Claude's last message renders as formatted text (bold, code, lists), not raw markdown.
+- **Privacy mode.** One toggle blurs paths, code and conversation, handy for screen sharing and streaming.
 - **Permissions.** Allow, Deny or "ask in terminal" from the overlay, with a desktop notification.
 - **Replies.** When Claude stops, its last message appears in a bubble. Type back from the overlay (see [Replying](#replying)).
 - **Multiple sessions.** One tab per Claude Code session.
@@ -42,6 +46,10 @@ npm run hooks      # add the Claude Code hooks (npm run hooks:remove to undo)
 
 Then restart any running Claude Code session.
 
+## Switching models
+
+Click the buddy and choose a model. Claude Code has no external API for changing a running session's model, so Buddy HUD uses its `/model` command: inside tmux and idle it types the command for you, otherwise it copies it to your clipboard to paste. The buddy changes colour straight away and confirms once Claude's next reply reports the new model.
+
 ## How it works
 
 Claude Code [hooks](https://docs.claude.com/en/docs/claude-code/hooks) POST each event (tool use, prompt, stop, permission request) with `curl` to a server on `127.0.0.1:47800`. The Electron app turns those events into animation, diffs and bubbles. Nothing leaves your machine. The hooks need only `curl`, which ships with macOS, Linux and Windows 10+.
@@ -59,6 +67,24 @@ Claude Code [hooks](https://docs.claude.com/en/docs/claude-code/hooks) POST each
 - **macOS and Windows:** the code paths exist (tray, always-on-top, login item, packaging) but have **not been tested on real machines yet**. Please open an issue with what you see.
 - On Windows, hooks run in the shell Claude Code uses. Git Bash is the best-supported setup because the hook reads `$TMUX`.
 
+## Privacy and security
+
+- Everything stays on your machine. The app listens only on `127.0.0.1:47800` and sends nothing to any server.
+- It reads the conversation transcript Claude Code already writes locally, only to show context use and Claude's last message.
+- The server rejects requests that carry a browser `Origin` header, so web pages cannot talk to it.
+- Allow/Deny works because the hook waits for your click; if the app is closed, Claude Code falls back to its normal prompt.
+- Turn on privacy mode in settings before screen sharing.
+
+## Troubleshooting
+
+| Symptom | Fix |
+|---|---|
+| Nothing appears | Start a new `claude` session (existing ones keep the old hook config). Check the tray menu: "Install Claude Code hooks". |
+| "Port 47800 is already in use" | Another copy is running. Quit it from its tray icon. |
+| Buddy is not on top (Linux) | Needs X11 or XWayland. The app relaunches itself with `--ozone-platform=x11`. |
+| Terminal shows "hook running" | You enabled "Hold turn-end for replies". Turn it off in settings. |
+| Model switch did nothing | Outside tmux it copies `/model …` to the clipboard. Paste it into Claude Code. |
+
 ## Uninstall
 
 Tray menu, "Remove Claude Code hooks", then quit and delete the app. Settings live in `~/.buddy-hud/`.
@@ -68,6 +94,7 @@ Tray menu, "Remove Claude Code hooks", then quit and delete the app. Settings li
 ```bash
 npm start            # run
 npm run dist         # build installers for the current OS
+npm test             # hook installer tests (uses a temp HOME)
 npm run promo        # re-record the demo video (needs ffmpeg)
 ```
 
