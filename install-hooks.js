@@ -35,16 +35,5 @@ function run(uninstall) {
   return uninstall ? 'Hooks removed from ' + FILE : 'Hooks installed in ' + FILE + ' - restart running Claude Code sessions';
 }
 
-// Default model for NEW sessions (a running session can only be changed with /model inside it).
-function setModel(model) {
-  if (!/^[A-Za-z0-9._\-\[\]]+$/.test(model)) throw new Error('invalid model name');
-  let settings = {};
-  if (fs.existsSync(FILE)) { settings = JSON.parse(fs.readFileSync(FILE, 'utf8')); fs.copyFileSync(FILE, FILE + '.bak-buddy-hud'); }
-  settings.model = model;
-  fs.mkdirSync(path.dirname(FILE), { recursive: true });
-  fs.writeFileSync(FILE, JSON.stringify(settings, null, 2) + '\n');
-  return `Default model for new Claude Code sessions: ${model}`;
-}
-
-module.exports = { run, setModel };
+module.exports = { run };
 if (require.main === module) console.log(run(process.argv.includes('--uninstall')));

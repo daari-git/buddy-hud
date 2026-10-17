@@ -14,14 +14,6 @@ const FAMILIES = {
   sonnet: { name: 'Sonnet', c: '#d97757', c2: '#f0956f', arg: 'sonnet' },
   haiku: { name: 'Haiku', c: '#2fb7a3', c2: '#7ee2d1', arg: 'haiku' },
 };
-// Versions Claude Code knows about (mirrors its /model list; what your plan can use varies)
-const MODELS = {
-  fable: [['Fable 5.1', 'claude-fable-5-1'], ['Fable 5', 'claude-fable-5', 1]],
-  opus: [['Opus 5.5', 'claude-opus-5-5', 1], ['Opus 5', 'claude-opus-5', 1], ['Opus 4.8', 'claude-opus-4-8', 1], ['Opus 4.7', 'claude-opus-4-7'], ['Opus 4.6', 'claude-opus-4-6', 1], ['Opus 4.5', 'claude-opus-4-5'], ['Opus 4.1', 'claude-opus-4-1'], ['Opus 4', 'claude-opus-4-0']],
-  sonnet: [['Sonnet 5.5', 'claude-sonnet-5-5', 1], ['Sonnet 5', 'claude-sonnet-5', 1], ['Sonnet 4.6', 'claude-sonnet-4-6', 1], ['Sonnet 4.5', 'claude-sonnet-4-5', 1], ['Sonnet 4', 'claude-sonnet-4-0']],
-  haiku: [['Haiku 5.5', 'claude-haiku-5-5'], ['Haiku 4.5', 'claude-haiku-4-5']],
-};
-let pickFam = null, pick1m = false, pickWait = false, noteSeen = 0;
 const famOf = (m) => ((String(m || '').match(/fable|opus|sonnet|haiku/i) || [''])[0]).toLowerCase();
 const modelLabel = (m) => {
   const x = String(m || '').match(/claude-(fable|opus|sonnet|haiku)-(\d+)(?:-(\d{1,2})(?!\d))?/i);
@@ -50,13 +42,11 @@ function setHtml(el, html) {
   const top = el.scrollTop;
   el.innerHTML = html; el.__html = html; el.scrollTop = top;
 }
-const normId = (m) => String(m || '').replace(/\[1m\]$/, '').replace(/-v\d+$/, '').replace(/-\d{8}$/, '');
-const sameModel = (a, id) => { const x = normId(a); return x === id || (id.endsWith('-4-0') && x === id.slice(0, -2)); };
 const plain = (s) => String(s ?? '').replace(/\*\*|__|`/g, '').replace(/^#{1,6}\s+/gm, '').replace(/^\s*[-*]\s+/gm, '').replace(/\s*\n\s*/g, ' ');
 const base = (p) => String(p).split(/[\\/]/).pop();
 
 let state = { sessions: [], perms: [], settings: {}, hooksInstalled: true };
-let picker = false;
+
 let selected = null;
 let drawer = false;
 const open = new Set();
@@ -72,10 +62,9 @@ function dragger(el, onClick) {
     addEventListener('mousemove', mv); addEventListener('mouseup', up);
   });
 }
-dragger($('mascot'), togglePicker);
+dragger($('mascot'), toggleDrawer);
 $('pill').onclick = toggleDrawer;
-function toggleDrawer() { drawer = !drawer; if (drawer) picker = false; render(); if (drawer) setTimeout(() => $('replyInput').focus(), 50); }
-function togglePicker() { picker = !picker; if (picker) drawer = false; render(); }
+function toggleDrawer() { drawer = !drawer; render(); if (drawer) setTimeout(() => $('replyInput').focus(), 50); }
 
 $('btnQuit').onclick = () => hud.send('quit');
 $('optReply').onchange = (e) => hud.send('set', { replyMode: e.target.checked });
@@ -137,12 +126,12 @@ function render() {
   document.body.dataset.act = a.act;
 
   // theme follows the model (picked model shows immediately, real model confirms later)
-  const fam = (s && (s.pickedModel || famOf(s.model))) || 'sonnet';
+  const fam = (s && famOf(s.model)) || 'sonnet';
   const th = FAMILIES[fam] || FAMILIES.sonnet;
   const rs = document.documentElement.style;
   rs.setProperty('--orange', th.c); rs.setProperty('--orange2', th.c2);
   document.body.classList.toggle('privacy', !!(state.settings && state.settings.privacy));
-  const label = s ? (s.pickedModel ? (s.pickedLabel || th.name) + ' …' : modelLabel(s.model) || th.name) : '';
+  const label = s ? (modelLabel(s.model) || th.name) : '';
   $('modelTag').hidden = !s; $('modelTag').querySelector('span').textContent = label;
 
   const svg = $('clawd');
@@ -204,37 +193,6 @@ function render() {
     $('feed').querySelectorAll('.item').forEach((el) => (el.onclick = () => { const id = +el.dataset.id; open.has(id) ? open.delete(id) : open.add(id); render(); }));
   }
 
-  // model picker (opened by clicking the buddy): family tabs, then every version Claude Code offers
-  $('picker').hidden = !picker || !s;
-  if (picker && s) {
-    const curFam = s.pickedModel || famOf(s.model);
-    if (!pickFam || !MODELS[pickFam]) pickFam = curFam || 'sonnet';
-    const curId = s.pickedId || s.model || '';
-    const tabs = Object.entries(FAMILIES).map(([k, f]) => `<button class="ft ${pickFam === k ? 'on' : ''}" data-fam="${k}" style="--c:${f.c}"><i></i>${f.name}${curFam === k ? ' ✓' : ''}</button>`).join('');
-    const f = FAMILIES[pickFam];
-    const rows = [[`${f.name} · latest`, f.arg, 1, true]].concat(MODELS[pickFam].map(([n, id, m1]) => [n, id, m1, false])).map(([n, id, m1, alias]) => {
-      const arg = id + (pick1m && m1 && !alias ? '[1m]' : '');
-      const inUse = alias ? false : !!curId && sameModel(curId, id);
-      return `<button class="mrow ${inUse ? 'on' : ''}" data-arg="${arg}" data-name="${esc(n)}" style="--c:${f.c}"><span class="nm">${esc(n)}${alias ? '' : pick1m && m1 ? ' · 1M' : ''}</span><span class="sm">${inUse ? '✓ in use' : '/model ' + arg}</span></button>`;
-    }).join('');
-    const note = s.pickNote && s.pickNote.t > noteSeen ? s.pickNote : null;
-    if (pickWait && note) pickWait = false;
-    if (note && note.mode === 'typed') { noteSeen = note.t; picker = false; $('picker').hidden = true; }
-    else if (note) {
-      setHtml($('picker'), `<div class="h">📋 <span>Copied <code>${esc(note.cmd)}</code></span></div><div class="sub" style="font-family:inherit;word-break:normal">I can't type into this terminal (${esc(note.why)}), so paste it into Claude Code and press Enter. The buddy keeps showing the model Claude is really using until it confirms the switch.</div><div class="btnRow"><button id="npDefault">Also use ${esc(note.label || note.arg)} for new sessions</button><button id="npClose">Done</button></div><div class="ph">Tip: run <code>claude</code> inside tmux and I can type it for you.</div>`);
-      $('npClose').onclick = () => { noteSeen = note.t; picker = false; render(); };
-      $('npDefault').onclick = () => { hud.send('setDefaultModel', { arg: note.arg }); noteSeen = note.t; picker = false; render(); };
-    } else {
-    setHtml($('picker'), `<div class="ph">Switch model for <b>${esc(s.project)}</b></div><div class="ftabs">${tabs}</div><div class="mlist">${rows}</div><label class="m1"><input type="checkbox" id="pick1m" ${pick1m ? 'checked' : ''}> 1M context variants</label><div class="ph">${s.tmux ? 'Typed into your tmux pane when Claude is idle.' : 'Copies the /model command: paste it into Claude Code.'} Availability depends on your plan.</div>`);
-    $('picker').querySelectorAll('.ft').forEach((b) => (b.onclick = () => { pickFam = b.dataset.fam; render(); }));
-    $('pick1m').onchange = (e) => { pick1m = e.target.checked; render(); };
-    $('picker').querySelectorAll('.mrow').forEach((b) => (b.onclick = () => {
-      hud.send('pickModel', { sessionId: s.id, family: pickFam, arg: b.dataset.arg, label: b.dataset.name });
-      pickWait = true; render();
-    }));
-    }
-  }
-
   // onboarding / empty states
   const ob = $('onboard');
   if (state.hooksInstalled === false) {
@@ -268,10 +226,10 @@ new ResizeObserver(fit).observe($('stage'));
 
 hud.onState((s) => { state = s; render(); });
 window.__push = (s) => { state = s; render(); };
-window.__ui = (o) => { if ('drawer' in o) drawer = o.drawer; if ('picker' in o) picker = o.picker; if (o.pick) hud.send('pickModel', o.pick); render(); };
+window.__ui = (o) => { if ('drawer' in o) drawer = o.drawer; render(); };
 setInterval(render, 1500);
 render();
 
 if (location.search.includes('promo') || location.search.includes('dance')) { const s = document.createElement('script'); s.src = location.search.includes('dance') ? 'dance.js' : 'promo.js'; document.body.appendChild(s); }
 
-addEventListener('keydown', (e) => { if (e.key === 'Escape' && (picker || drawer)) { picker = false; drawer = false; render(); } });
+addEventListener('keydown', (e) => { if (e.key === 'Escape' && drawer) { drawer = false; render(); } });

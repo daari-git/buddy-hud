@@ -173,18 +173,11 @@ body[data-act=idle] #clawd { --body: color-mix(in srgb, var(--orange) 80%, #000)
 .say .mdh { font-weight: 700; color: #fff; margin: 6px 0 2px; }
 .say .lnk { color: var(--orange2); text-decoration: underline; }
 
-/* model picker + tag */
-#picker { display: flex; flex-direction: column; gap: 4px; padding: 8px; }
-#picker .ph { color: var(--dim); font-size: 11.5px; padding: 2px 6px 4px; }
-#picker button { display: flex; align-items: center; gap: 10px; text-align: left; padding: 7px 10px; border-radius: 12px; }
-#picker button i { width: 14px; height: 14px; border-radius: 4px; background: var(--c); flex: none; }
-#picker button .nm { flex: 1; font-weight: 600; }
-#picker button .sm { color: var(--dim); font-size: 11.5px; }
-#picker button.on { border-color: var(--c); background: color-mix(in srgb, var(--c) 22%, transparent); }
+/* model tag */
 #modelTag { position: absolute; left: 50%; bottom: -14px; transform: translateX(-50%); display: flex; align-items: center; gap: 6px; padding: 2px 10px; border-radius: 999px; background: var(--glass); border: 1px solid var(--line); font-size: 11.5px; white-space: nowrap; pointer-events: none; }
 #modelTag i { width: 8px; height: 8px; border-radius: 50%; background: var(--orange); }
 #dock { padding-bottom: 14px; }
-#mascot { cursor: pointer; }
+
 
 /* files + settings */
 #files { display: grid; gap: 6px; margin-bottom: 6px; }
@@ -207,20 +200,6 @@ body.privacy .sub, body.privacy .diff, body.privacy .say, body.privacy #feed .t,
 @media (prefers-reduced-motion: reduce) {
   #clawd *, .bubble, .dot, .badge { animation: none !important; }
 }
-
-/* picker v2 */
-#picker { gap: 6px; }
-#picker .ftabs { display: flex; gap: 6px; }
-#picker .ft { flex: 1; display: flex; align-items: center; justify-content: center; gap: 6px; padding: 5px 4px; font-size: 12.5px; border-radius: 10px; }
-#picker .ft i { width: 9px; height: 9px; border-radius: 3px; background: var(--c); }
-#picker .ft.on { border-color: var(--c); background: color-mix(in srgb, var(--c) 24%, transparent); font-weight: 600; }
-#picker .mlist { display: flex; flex-direction: column; gap: 3px; max-height: 250px; overflow-y: auto; }
-#picker .mrow { display: flex; align-items: center; gap: 8px; text-align: left; padding: 6px 10px; border-radius: 10px; }
-#picker .mrow:hover { border-color: var(--c); }
-#picker .mrow.on { border-color: var(--c); background: color-mix(in srgb, var(--c) 22%, transparent); }
-#picker .mrow .nm { flex: 1; font-weight: 600; }
-#picker .mrow .sm { color: var(--dim); font: 11px ui-monospace, monospace; }
-#picker label.m1 { font-size: 12px; color: var(--dim); display: flex; gap: 6px; align-items: center; }
 
 /* slim scrollbars (no arrows) */
 ::-webkit-scrollbar { width: 6px; height: 6px; }

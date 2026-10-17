@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.2
+
+- Removed the in-app model switcher: Claude Code cannot be driven reliably from outside, so it never matched the terminal. The buddy still shows and tints to the model actually in use.
+
 ## 0.1.1
 
 - Model picker lists every version per family, like `/model`, with a 1M toggle; fixes wrong version labels and false "in use" marks.
@@ -11,7 +15,7 @@
 
 - Animated pixel buddy reacting to tool use: typing, reading, searching, thinking, waiting for you, asleep.
 - Live diffs with line numbers, permission Allow/Deny from the overlay, context ring, multi-session tabs.
-- Model switcher on the buddy; colour theme follows the model (Fable, Opus, Sonnet, Haiku).
+- Colour theme follows the model in use (Fable, Opus, Sonnet, Haiku).
 - Unique file counts (read / edited) always visible, with file lists in details.
 - Claude's replies render markdown. Privacy mode, size setting, remembered position.
 - Curl-based hooks (no Node needed), tray menu, start at login, first-run connect prompt.

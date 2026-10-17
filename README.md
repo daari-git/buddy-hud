@@ -13,7 +13,7 @@ A floating pixel buddy for [Claude Code](https://claude.com/claude-code). It sit
 - **The buddy reacts to the work.** Typing hands for edits and commands, eyes sweeping for reads, a swinging magnifier for searches, a hand on the head while thinking, a wave when Claude needs you, asleep when idle.
 - **Live diffs.** See the file, the line number and the exact lines Claude is changing.
 - **File counts.** The pill beside the buddy always shows unique files read and edited plus commands run. Open details for the file lists.
-- **Model switcher + theme.** Click the buddy to pick Fable, Opus, Sonnet or Haiku. The buddy and the whole UI change colour to match the model in use (purple Opus, orange Sonnet, teal Haiku, magenta Fable).
+- **Model colours.** The buddy and the UI change colour to match the model Claude is using, with the model name under the buddy.
 - **Context window.** A ring shows how full the context is.
 - **Readable replies.** Claude's last message renders as formatted text (bold, code, lists), not raw markdown.
 - **Privacy mode.** One toggle blurs paths, code and conversation, handy for screen sharing and streaming.
@@ -21,7 +21,7 @@ A floating pixel buddy for [Claude Code](https://claude.com/claude-code). It sit
 - **Replies.** When Claude stops, its last message appears in a bubble. Type back from the overlay (see [Replying](#replying)).
 - **Multiple sessions.** One tab per Claude Code session.
 
-Click the buddy for history and settings. Drag it anywhere.
+Click the buddy (or the pill) for history, files and settings. Drag it anywhere.
 
 ## Install
 
@@ -46,14 +46,9 @@ npm run hooks      # add the Claude Code hooks (npm run hooks:remove to undo)
 
 Then restart any running Claude Code session.
 
-## Switching models
+## Model colours
 
-Click the buddy, pick a family (Fable, Opus, Sonnet, Haiku), then any version Claude Code offers (Opus 5.5 down to 4, Sonnet 5.5 to 4, optional 1M-context variants). Availability depends on your plan.
-
-A terminal program cannot be driven from outside, so how the switch happens depends on where Claude Code runs:
-
-- **Inside tmux and idle:** Buddy HUD types `/model ...` into the pane. The buddy changes colour as soon as Claude's next reply confirms the model.
-- **Anywhere else:** it copies the `/model ...` command to your clipboard and tells you to paste it. It never pretends the model changed; the buddy always shows the model Claude is really using. A button can also make the choice the default for new sessions (writes `model` in `~/.claude/settings.json`, backup saved).
+Buddy HUD shows which model Claude is really using, from the conversation transcript, and tints the buddy and the UI to match (purple Opus, orange Sonnet, teal Haiku, magenta Fable). It is display only. It does not switch models; use `/model` in Claude Code for that.
 
 ## How it works
 
@@ -88,7 +83,6 @@ Claude Code [hooks](https://docs.claude.com/en/docs/claude-code/hooks) POST each
 | "Port 47800 is already in use" | Another copy is running. Quit it from its tray icon. |
 | Buddy is not on top (Linux) | Needs X11 or XWayland. The app relaunches itself with `--ozone-platform=x11`. |
 | Terminal shows "hook running" | You enabled "Hold turn-end for replies". Turn it off in settings. |
-| Model switch did nothing | Outside tmux it copies `/model …` to the clipboard. Paste it into Claude Code. |
 
 ## Uninstall
 

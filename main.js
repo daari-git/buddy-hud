@@ -1,5 +1,5 @@
 const { execFile } = require('child_process');
-const { app, BrowserWindow, ipcMain, screen, Notification, Menu, Tray, nativeImage, dialog, clipboard } = require('electron');
+const { app, BrowserWindow, ipcMain, screen, Notification, Menu, Tray, nativeImage, dialog } = require('electron');
 const http = require('http');
 const fs = require('fs');
 const os = require('os');
@@ -44,14 +44,6 @@ const emojiFor = (t) => TOOL_EMOJI[t] || (t && t.startsWith('mcp__') ? '🔌' : 
 const addUnique = (arr, v, max = 300) => { if (!arr.includes(v)) { arr.push(v); if (arr.length > max) arr.shift(); } };
 const famOf = (m) => ((String(m || '').match(/fable|opus|sonnet|haiku/i) || [''])[0]).toLowerCase();
 
-function clearPickIfApplied(s) {
-  if (!s.pickedId) return;
-  const want = s.pickedId.replace(/\[1m\]$/, '');
-  const norm = (x) => String(x || '').replace(/\[1m\]$/, '').replace(/-v\d+$/, '').replace(/-\d{8}$/, '');
-  const applied = /^(opus|sonnet|haiku)$/.test(want) ? famOf(s.model) === want : (norm(s.model) === want || (want.endsWith('-4-0') && norm(s.model) === want.slice(0, -2)));
-  if (applied || Date.now() - s.pickedAt > 120000) { s.pickedModel = ''; s.pickedId = ''; s.pickedLabel = ''; }
-}
-
 function getSession(id, ev) {
   let s = sessions.get(id);
   if (!s) {
@@ -59,7 +51,7 @@ function getSession(id, ev) {
     s = {
       id, cwd: ev.cwd || '', project: path.basename(ev.cwd || '') || 'session', model: '',
       status: 'idle', note: '', tool: null, feed: [], ctx: { used: 0, max: settings.ctxMax },
-      stats: { reads: 0, edits: 0, cmds: 0, other: 0 }, files: { read: [], edited: [] }, pickedModel: '', pickedId: '', pickedLabel: '', pickedAt: 0, prompt: '', transcript: ev.transcript_path || '',
+      stats: { reads: 0, edits: 0, cmds: 0, other: 0 }, files: { read: [], edited: [] }, prompt: '', transcript: ev.transcript_path || '',
       started: Date.now(), updated: Date.now(),
     };
     sessions.set(id, s);
@@ -142,7 +134,7 @@ function readContext(s) {
       const u = m.message && m.message.usage;
       if (!u) continue;
       s.ctx.used = (u.input_tokens || 0) + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0) + (u.output_tokens || 0);
-      if (m.message.model) { s.model = m.message.model; clearPickIfApplied(s); }
+      if (m.message.model) s.model = m.message.model;
       break;
     }
   } catch {}
@@ -479,29 +471,6 @@ ipcMain.on('installHooks', () => {
   try { toast('Buddy HUD', require('./install-hooks').run(false)); } catch (e) { toast('Buddy HUD', 'Hook install failed: ' + e.message); }
   hooksCache.t = 0; emit();
 });
-ipcMain.on('pickModel', (_e, { sessionId, family, arg, label }) => {
-  const s = sessions.get(sessionId);
-  if (!s || !/^[A-Za-z0-9._\-\[\]]+$/.test(String(arg))) return;
-  const cmd = `/model ${arg}`;
-  if (s.tmux && ['done', 'waiting', 'idle'].includes(s.status)) {
-    // really switches: type the slash command into the pane Claude Code runs in
-    s.pickedModel = family; s.pickedId = arg; s.pickedLabel = label || ''; s.pickedAt = Date.now();
-    const base = ['-S', s.tmux.socket];
-    execFile('tmux', [...base, 'send-keys', '-t', s.tmux.pane, '-l', cmd], () =>
-      setTimeout(() => execFile('tmux', [...base, 'send-keys', '-t', s.tmux.pane, 'Enter'], () => {}), 120));
-    s.pickNote = { mode: 'typed', cmd, arg, label, t: Date.now() };
-    pushFeed(s, { emoji: '🎛️', text: `switching model: ${cmd}`, kind: 'info' });
-  } else {
-    // no way to type into an arbitrary terminal: copy the command, and do NOT pretend the model changed
-    clipboard.writeText(cmd);
-    s.pickNote = { mode: 'copied', cmd, arg, label, why: s.tmux ? 'Claude is busy' : 'not running inside tmux', t: Date.now() };
-    pushFeed(s, { emoji: '📋', text: `copied ${cmd} — paste in Claude Code`, kind: 'info' });
-  }
-  emit();
-});
-ipcMain.on('setDefaultModel', (_e, { arg }) => {
-  try { toast('Buddy HUD', require('./install-hooks').setModel(String(arg))); } catch (e) { toast('Buddy HUD', 'Could not set default model: ' + e.message); }
-});
 
 
 app.on('second-instance', () => { if (win) { pinned = true; win.showInactive(); emit(); } });
@@ -509,7 +478,6 @@ app.on('second-instance', () => { if (win) { pinned = true; win.showInactive(); 
 setInterval(() => {
   let changed = false;
   for (const [id, s] of sessions) {
-    clearPickIfApplied(s);
     if (Date.now() - s.updated > 45 * 60 * 1000 && !stopHolds.has(id)) { sessions.delete(id); changed = true; }
   }
   if (changed) emit();
