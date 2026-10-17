@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.1
+
+- Release packaging: Intel and Apple Silicon Mac builds, separate Windows installer and portable exe.
+
 ## 0.2.0
 
 - Health indicator and hook self-test; end-to-end test suite that drives the real app (runs in CI).

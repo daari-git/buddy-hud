@@ -37,10 +37,12 @@ Download the installer for your system from the [Releases page](https://github.c
 | OS | File |
 |---|---|
 | Linux | `.AppImage` or `.deb` |
-| macOS | `.dmg` |
-| Windows | `.exe` installer or portable |
+| macOS | `.dmg` (`arm64` for Apple Silicon, `x64` for Intel) |
+| Windows | `win-setup.exe` installer or `win-portable.exe` |
 
 On first launch Buddy HUD asks to add its hooks to `~/.claude/settings.json` (a backup is saved as `settings.json.bak-buddy-hud`) and to start at login. Both are in the tray menu later.
+
+> **Unsigned builds.** macOS: right-click the app, choose Open, then Open again (or run `xattr -cr "/Applications/Buddy HUD.app"`). Windows: on the SmartScreen warning click "More info", then "Run anyway".
 
 ### From source
 

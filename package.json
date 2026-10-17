@@ -1,6 +1,6 @@
 {
   "name": "buddy-hud",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "A floating pixel buddy that shows what Claude Code is doing - live diffs, permissions, context, replies. Unofficial.",
   "main": "main.js",
   "scripts": {
@@ -69,8 +69,20 @@
     },
     "mac": {
       "target": [
-        "dmg",
-        "zip"
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        }
       ],
       "category": "public.app-category.developer-tools",
       "icon": "build/icon.png",
@@ -87,7 +99,11 @@
     },
     "nsis": {
       "oneClick": true,
-      "perMachine": false
+      "perMachine": false,
+      "artifactName": "buddy-hud-${version}-win-setup.${ext}"
+    },
+    "portable": {
+      "artifactName": "buddy-hud-${version}-win-portable.${ext}"
     }
   },
   "dependencies": {
