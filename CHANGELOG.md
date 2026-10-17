@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.3
+
+- Fix: the buddy was hidden at login whenever no Claude session was open. New setting "Always show" (on by default) keeps it on screen like a desktop pet.
+
 ## 0.4.2
 
 - **Security / Windows:** the Windows hook command used `cmd /c "..."`. Claude Code runs hooks through Git Bash, which rewrites `/c` to `C:/`, so cmd started interactively and executed the hook's JSON payload as commands (junk files, and a payload containing `&` could run arbitrary commands). Hooks are now a plain `curl.exe ... --data-binary "@-"` call that works in Git Bash, cmd and PowerShell. Existing Windows installs are repaired automatically on launch. Reported, with a verified fix, by a Windows tester. Thank you!

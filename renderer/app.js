@@ -105,6 +105,7 @@ $('btnQuit').onclick = () => hud.send('quit');
 $('optReply').onchange = (e) => hud.send('set', { replyMode: e.target.checked });
 $('optCtx').onchange = (e) => hud.send('set', { ctxMax: +e.target.value });
 $('optScale').onchange = (e) => hud.send('set', { scale: +e.target.value });
+$('optAlways').onchange = (e) => hud.send('set', { alwaysShow: e.target.checked });
 $('optWalk').onchange = (e) => hud.send('set', { walk: e.target.checked });
 $('optSkin').onchange = (e) => hud.send('set', { skin: e.target.value });
 $('optPhone').onchange = (e) => hud.send('phone', { enabled: e.target.checked });
@@ -260,6 +261,7 @@ function render() {
     $('optScale').value = String(state.settings.scale || 1);
     $('optPrivacy').checked = !!state.settings.privacy;
     $('optWalk').checked = state.settings.walk !== false;
+    $('optAlways').checked = state.settings.alwaysShow !== false;
     setHtml($('lastmsg'), s && s.lastMsg ? `<div class="fh">💬 Claude’s last message</div><div class="say">${md(s.lastMsg)}</div>` : '');
     $('optSkin').value = (state.settings && state.settings.skin) || 'bot';
     const ph = state.phone || {};

@@ -34,7 +34,7 @@ const sessions = new Map(); // id -> session
 const pendingPerms = new Map(); // id -> { res, sessionId, tool, summary, diff }
 const stopHolds = new Map(); // sessionId -> res
 const queued = new Map(); // sessionId -> [text]
-const DEFAULTS = { walk: true, phone: { enabled: false, token: '' }, replyMode: false, ctxMax: 200000, scale: 1, privacy: false, pos: null, skin: 'bot', alerts: { notify: true, sound: true, done: true, ask: true, stuck: true, dnd: false } };
+const DEFAULTS = { alwaysShow: true, walk: true, phone: { enabled: false, token: '' }, replyMode: false, ctxMax: 200000, scale: 1, privacy: false, pos: null, skin: 'bot', alerts: { notify: true, sound: true, done: true, ask: true, stuck: true, dnd: false } };
 let settings = { ...DEFAULTS };
 try { const saved = JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8')); settings = { ...DEFAULTS, ...saved, alerts: { ...DEFAULTS.alerts, ...(saved.alerts || {}) } }; } catch {}
 const DAILY_FILE = path.join(os.homedir(), '.buddy-hud', 'daily.json');
@@ -491,7 +491,7 @@ function emit() {
     if (active) {
       if (!TEST && !win.isVisible() && (!userHidden || pendingPerms.size || stopHolds.size)) win.showInactive();
     } else {
-      hideTimer = setTimeout(() => { if (!sessions.size && !pinned && !process.env.HUD_KEEP && hooksInstalled()) win.hide(); }, 15000);
+      hideTimer = setTimeout(() => { if (!sessions.size && !pinned && !process.env.HUD_KEEP && hooksInstalled() && settings.alwaysShow === false) win.hide(); }, 15000);
     }
   }, 30);
 }
@@ -546,7 +546,7 @@ function createWindow() {
   win.webContents.on('did-finish-load', () => {
     win.webContents.setZoomFactor(settings.scale || 1);
     win.webContents.send('state', snapshot());
-    if (!TEST && (process.env.HUD_KEEP || sessions.size || !hooksInstalled())) win.showInactive();
+    if (!TEST && (process.env.HUD_KEEP || sessions.size || !hooksInstalled() || settings.alwaysShow !== false)) win.showInactive();
     if (process.env.HUD_UI) setTimeout(() => win.webContents.executeJavaScript(`__ui(${process.env.HUD_UI})`), 4500);
     if (process.env.HUD_SHOT) setTimeout(async () => {
       const img = await win.webContents.capturePage();
