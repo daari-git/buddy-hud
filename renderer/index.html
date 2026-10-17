@@ -11,12 +11,28 @@
     <div id="perms"></div>
     <div id="onboard" class="bubble" hidden></div>
     <div id="drawer" class="bubble" hidden>
+      <div id="health"></div>
       <div id="tabs"></div>
       <div class="stats" id="chips"></div>
+      <div id="usage"></div>
       <div id="files"></div>
       <div class="feedHead">Activity</div>
       <div id="feed"></div>
       <div id="settings">
+        <div class="grp">Alerts</div>
+        <label><input type="checkbox" id="alNotify"> 🔔 Notifications</label>
+        <label><input type="checkbox" id="alSound"> 🔊 Sound</label>
+        <label><input type="checkbox" id="alDone"> ✅ finished</label>
+        <label><input type="checkbox" id="alAsk"> 🙋 needs me</label>
+        <label><input type="checkbox" id="alStuck"> ⏳ stuck / context</label>
+        <label><input type="checkbox" id="alDnd"> 🌙 Do not disturb</label>
+        <div class="grp">Phone</div>
+        <label title="Approve permissions and reply from your phone on the same Wi-Fi"><input type="checkbox" id="optPhone"> 📱 Phone access (same Wi-Fi)</label>
+        <div id="phoneBox" hidden></div>
+        <div class="grp">Display</div>
+        <label>Look
+          <select id="optSkin"><option value="bot">Bot</option><option value="cat">Cat</option><option value="classic">Classic (logo homage)</option></select>
+        </label>
         <label>Size
           <select id="optScale"><option value="0.85">Small</option><option value="1">Normal</option><option value="1.25">Large</option></select>
         </label>
@@ -45,7 +61,7 @@
   <div id="dock">
     <button id="pill" title="details">
       <svg class="arc" viewBox="0 0 36 36"><circle cx="18" cy="18" r="15" class="track"/><circle cx="18" cy="18" r="15" class="fill" id="arc" pathLength="100"/></svg>
-      <span class="pt"><b id="pillPct">0%</b><small id="pillSub">idle</small></span>
+      <i id="hdot"></i><span class="pt"><b id="pillPct">0%</b><small id="pillSub">idle</small></span>
     </button>
 
     <div id="mascot" title="Click for details">
@@ -60,6 +76,8 @@
           <g class="body">
             <g class="leg" id="legA"><rect x="0" y="114" width="16" height="44"/><rect x="36" y="114" width="16" height="44"/></g>
             <g class="leg" id="legB"><rect x="107" y="114" width="16" height="44"/><rect x="144" y="114" width="16" height="44"/></g>
+            <g class="deco" id="antenna"><rect x="76" y="-26" width="8" height="26"/><circle cx="80" cy="-32" r="10"/></g>
+            <g class="deco" id="ears"><polygon points="8,0 8,-38 46,0"/><polygon points="152,0 152,-38 114,0"/></g>
             <rect class="torso" x="0" y="0" width="160" height="114"/>
             <g class="hand" id="handL"><rect x="-18" y="38" width="18" height="38"/></g>
             <g class="hand" id="handR"><rect x="160" y="38" width="18" height="38"/></g>

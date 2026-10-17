@@ -206,3 +206,43 @@ body.privacy .sub, body.privacy .diff, body.privacy .say, body.privacy #feed .t,
 ::-webkit-scrollbar-button { display: none; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: rgba(255,255,255,.22); border-radius: 3px; }
+
+/* health, alerts, summary */
+#hdot { position: absolute; top: 3px; right: 6px; width: 9px; height: 9px; border-radius: 50%; background: #8a7f75; box-shadow: 0 0 0 2px var(--glass); }
+#hdot.ok { background: var(--green); } #hdot.partial, #hdot.stuck { background: var(--amber); } #hdot.off { background: var(--red); }
+#pill { position: relative; }
+#health { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 12px; padding: 6px 10px; border-radius: 10px; margin-bottom: 6px; background: rgba(255,255,255,.06); border-left: 3px solid #8a7f75; }
+#health.ok { border-color: var(--green); } #health.partial, #health.stuck { border-color: var(--amber); } #health.off { border-color: var(--red); }
+#health .msg { flex: 1; min-width: 160px; }
+#health .st { width: 100%; color: var(--dim); }
+#settings .grp { width: 100%; font-size: 11px; text-transform: uppercase; letter-spacing: .6px; color: var(--dim); margin-top: 4px; }
+.sum { margin: 6px 0 2px; font-size: 12.5px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.sum .away { width: 100%; color: var(--amber); font-weight: 600; }
+.sum .pillx { padding: 1px 8px; border-radius: 999px; background: rgba(255,255,255,.08); }
+.sum .bad { background: color-mix(in srgb, var(--red) 25%, transparent); }
+
+/* skins */
+#clawd .deco { display: none; }
+#clawd .deco rect, #clawd .deco polygon, #clawd .deco circle { fill: var(--body); transition: fill .3s; }
+#clawd[data-skin=bot] .torso { rx: 34px; ry: 34px; }
+#clawd[data-skin=bot] #antenna { display: block; }
+#clawd[data-skin=bot] #antenna circle { fill: var(--orange2); animation: blinkLed 2s infinite; }
+@keyframes blinkLed { 50% { opacity: .35; } }
+#clawd[data-skin=bot] .hand rect { rx: 9px; }
+#clawd[data-skin=bot] .leg rect { rx: 5px; }
+#clawd[data-skin=cat] .torso { rx: 22px; ry: 22px; }
+#clawd[data-skin=cat] #ears { display: block; }
+#clawd[data-skin=cat] .hand rect, #clawd[data-skin=cat] .leg rect { rx: 8px; }
+#phoneBox { width: 100%; display: flex; gap: 10px; align-items: center; }
+#phoneBox img { width: 110px; height: 110px; border-radius: 8px; background: #fff; }
+#phoneBox .url { font: 11.5px ui-monospace, monospace; word-break: break-all; user-select: text; }
+#phoneBox .warn { color: var(--amber); font-size: 11.5px; margin-top: 4px; }
+#usage { display: grid; gap: 2px; margin-bottom: 6px; font-size: 12.5px; }
+#usage .row { display: flex; justify-content: space-between; gap: 8px; }
+#usage .row span:first-child { color: var(--dim); }
+.openfile, [data-open], [data-diff] { cursor: pointer; }
+.linkbtn { background: none; border: 0; color: var(--orange2); text-decoration: underline; padding: 0 4px; font-size: 12px; }
+#files .fl span[data-open]:hover, .sum .pillx[data-open]:hover { outline: 1px solid var(--orange); }
+
+#perms { max-height: 60vh; overflow-y: auto; }
+#perms::-webkit-scrollbar { width: 6px; }

@@ -6,21 +6,33 @@ const os = require('os');
 const path = require('path');
 
 const FILE = path.join(os.homedir(), '.claude', 'settings.json');
-const URL = 'http://127.0.0.1:47800/hook';
+const URL = `http://127.0.0.1:${process.env.BUDDY_PORT || 47800}/hook`;
 const LEGACY = 'claude-hud/hook.js';
 // Permission / Stop hooks wait for the overlay, so they get a long timeout and no curl cap.
 const EVENTS = { SessionStart: 0, SessionEnd: 0, UserPromptSubmit: 0, PreToolUse: 0, PostToolUse: 0, Notification: 0, SubagentStop: 0, PermissionRequest: 900, Stop: 900 };
 
-const command = (long) =>
-  `curl -s ${long ? '' : '-m 3 '}-X POST -H "Content-Type: application/json" -H "X-Buddy-Tmux: \${TMUX:-}" -H "X-Buddy-Pane: \${TMUX_PANE:-}" --data-binary @- ${URL} || true`;
+// POSIX: `|| true` keeps Claude Code quiet when the app is not running. Windows: no TMUX, and the
+// `cmd /c` wrapper gives the same "never fail" behaviour in cmd, PowerShell and Git Bash alike.
+const command = (long) => process.platform === 'win32'
+  ? `cmd /c "curl.exe -s ${long ? '' : '-m 3 '}-X POST -H Content-Type:application/json --data-binary @- ${URL} || exit /b 0"`
+  : `curl -s ${long ? '' : '-m 3 '}-X POST -H "Content-Type: application/json" -H "X-Buddy-Tmux: \${TMUX:-}" -H "X-Buddy-Pane: \${TMUX_PANE:-}" --data-binary @- ${URL} || true`;
+
+function readSettings() {
+  if (!fs.existsSync(FILE)) return {};
+  const raw = fs.readFileSync(FILE, 'utf8');
+  return raw.trim() ? JSON.parse(raw) : {};
+}
+function writeSettings(settings) {
+  fs.mkdirSync(path.dirname(FILE), { recursive: true });
+  const tmp = FILE + '.tmp-buddy';
+  fs.writeFileSync(tmp, JSON.stringify(settings, null, 2) + '\n');
+  fs.renameSync(tmp, FILE); // atomic: Claude Code never sees a half-written file
+}
+function backupOnce() { if (fs.existsSync(FILE) && !fs.existsSync(FILE + '.bak-buddy-hud')) fs.copyFileSync(FILE, FILE + '.bak-buddy-hud'); }
 
 function run(uninstall) {
-  fs.mkdirSync(path.dirname(FILE), { recursive: true });
-  let settings = {};
-  if (fs.existsSync(FILE)) {
-    settings = JSON.parse(fs.readFileSync(FILE, 'utf8'));
-    fs.copyFileSync(FILE, FILE + '.bak-buddy-hud');
-  }
+  const settings = readSettings();
+  backupOnce();
   settings.hooks = settings.hooks || {};
   const ours = (h) => String(h.command || '').includes(URL) || String(h.command || '').includes(LEGACY);
   for (const [ev, timeout] of Object.entries(EVENTS)) {
@@ -31,7 +43,7 @@ function run(uninstall) {
     if (groups.length) settings.hooks[ev] = groups; else delete settings.hooks[ev];
   }
   if (!Object.keys(settings.hooks).length) delete settings.hooks;
-  fs.writeFileSync(FILE, JSON.stringify(settings, null, 2) + '\n');
+  writeSettings(settings);
   return uninstall ? 'Hooks removed from ' + FILE : 'Hooks installed in ' + FILE + ' - restart running Claude Code sessions';
 }
 

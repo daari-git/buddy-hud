@@ -19,6 +19,13 @@ A floating pixel buddy for [Claude Code](https://claude.com/claude-code). It sit
 - **Privacy mode.** One toggle blurs paths, code and conversation, handy for screen sharing and streaming.
 - **Permissions.** Allow, Deny or "ask in terminal" from the overlay, with a desktop notification.
 - **Replies.** When Claude stops, its last message appears in a bubble. Type back from the overlay (see [Replying](#replying)).
+- **Alerts.** Sound and desktop notification when Claude finishes, needs you, seems stuck (3 min of silence) or the context is 85% / 95% full. Per-alert switches and do-not-disturb.
+- **Timers and summary.** Live elapsed time while Claude works. When it finishes you see how long it took, the files it edited (click to open), commands run and errors, flagged "While you were away" if you were not looking.
+- **Usage and cost.** Tokens per session and today, with an estimated cost for models whose price is known (add or override prices in `~/.buddy-hud/prices.json`, e.g. `{"claude-opus-5-5":[5,25]}` in USD per million tokens in/out). Unpriced models are counted in tokens only.
+- **Full diffs.** "Open full diff" shows the whole change in its own window.
+- **Health indicator.** A dot on the pill: green connected, grey waiting, amber missing hooks or silent, red not installed. Details and a self-test button in the panel and tray.
+- **Phone access (opt-in).** Approve permissions and reply from your phone on the same Wi-Fi. Off by default; see Privacy.
+- **Looks.** Bot (default), Cat, or Classic (logo homage).
 - **Multiple sessions.** One tab per Claude Code session.
 
 Click the buddy (or the pill) for history, files and settings. Drag it anywhere.
@@ -74,6 +81,7 @@ Claude Code [hooks](https://docs.claude.com/en/docs/claude-code/hooks) POST each
 - The server rejects requests that carry a browser `Origin` header, so web pages cannot talk to it.
 - Allow/Deny works because the hook waits for your click; if the app is closed, Claude Code falls back to its normal prompt.
 - Turn on privacy mode in settings before screen sharing.
+- **Phone access opens a second server on your local network** (port 47801, only while enabled). Anyone on the same Wi-Fi with the secret link can approve commands and reply as you. The link carries a random token, repeated wrong guesses are blocked, and traffic is plain HTTP, so use it only on networks you trust and press "New link" if it leaks.
 
 ## Troubleshooting
 

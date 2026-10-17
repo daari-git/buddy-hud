@@ -1,0 +1,42 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<title>Diff</title>
+<style>
+  :root { color-scheme: dark; }
+  body { margin: 0; background: #181513; color: #f4eee8; font: 13px/1.5 system-ui, "Noto Color Emoji", sans-serif; }
+  header { position: sticky; top: 0; display: flex; gap: 10px; align-items: center; padding: 10px 16px; background: #221e1b; border-bottom: 1px solid #ffffff1a; }
+  header b { flex: 1; font: 13px ui-monospace, monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  button { font: inherit; color: inherit; background: #ffffff12; border: 1px solid #ffffff1f; border-radius: 8px; padding: 4px 10px; cursor: pointer; }
+  button:hover { background: #ffffff26; }
+  .hunk { margin: 14px 16px 0; color: #a79d92; font-size: 12px; }
+  pre { margin: 4px 16px 0; font: 12.5px/1.5 ui-monospace, "JetBrains Mono", monospace; border-radius: 8px; overflow-x: auto; background: #00000040; user-select: text; }
+  .l { display: block; padding: 0 10px; white-space: pre; }
+  .n { display: inline-block; width: 4ch; color: #6f665d; user-select: none; text-align: right; margin-right: 10px; }
+  .add { background: #5fd38d2b; color: #b6f0cc; } .del { background: #ff6b6b2b; color: #ffc2c2; }
+  .empty { padding: 40px; text-align: center; color: #a79d92; }
+</style></head>
+<body>
+<header><b id="file">…</b><span id="stat"></span><button id="copy">Copy diff</button><button id="open">Open file</button></header>
+<div id="out"><div class="empty">Loading…</div></div>
+<script>
+const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+diffApi.get().then((d) => {
+  if (!d || !d.hunks) { document.getElementById('out').innerHTML = '<div class="empty">No diff available for this action.</div>'; return; }
+  document.title = 'Diff · ' + (d.file || '');
+  document.getElementById('file').textContent = d.file || '';
+  let adds = 0, dels = 0, text = '';
+  const html = d.hunks.map((h) => {
+    adds += h.add.length; dels += h.del.length;
+    let n = h.start || 0;
+    const del = h.del.map((l) => { text += '- ' + l + '\n'; return `<span class="l del"><span class="n">${n ? n++ : ''}</span>- ${esc(l)}</span>`; }).join('');
+    let m = h.start || 0;
+    const add = h.add.map((l) => { text += '+ ' + l + '\n'; return `<span class="l add"><span class="n">${m ? m++ : ''}</span>+ ${esc(l)}</span>`; }).join('');
+    return `<div class="hunk">${d.isNew ? '✨ new file' : h.start ? '@@ line ' + h.start : '@@'} · −${h.del.length} +${h.add.length}</div><pre>${del}${add}</pre>`;
+  }).join('');
+  document.getElementById('out').innerHTML = html;
+  document.getElementById('stat').innerHTML = `<span style="color:#b6f0cc">+${adds}</span> <span style="color:#ffc2c2">−${dels}</span>`;
+  document.getElementById('copy').onclick = () => navigator.clipboard.writeText(text).catch(() => {});
+  document.getElementById('open').onclick = () => diffApi.open(d.file);
+});
+</script></body></html>

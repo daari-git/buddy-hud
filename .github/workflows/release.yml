@@ -16,7 +16,7 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: 22 }
       - run: npm ci
-      - run: npm test
+      - run: node test/install-hooks.test.js && node test/usage.test.js
       - run: npx electron-builder --publish never
       - uses: softprops/action-gh-release@v2
         if: startsWith(github.ref, 'refs/tags/v')

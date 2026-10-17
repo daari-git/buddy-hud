@@ -1,11 +1,16 @@
 const { execFile } = require('child_process');
-const { app, BrowserWindow, ipcMain, screen, Notification, Menu, Tray, nativeImage, dialog } = require('electron');
+const { app, BrowserWindow, ipcMain, screen, Notification, Menu, Tray, nativeImage, dialog, shell } = require('electron');
+const crypto = require('crypto');
+const usageLib = require('./lib/usage');
 const http = require('http');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-const PORT = 47800;
+const PORT = +process.env.BUDDY_PORT || 47800;
+const HOOK_URL = `127.0.0.1:${PORT}/hook`;
+const HOOK_EVENTS = ['SessionStart', 'SessionEnd', 'UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'Notification', 'SubagentStop', 'PermissionRequest', 'Stop'];
+const TEST = !!process.env.HUD_TEST;
 const SETTINGS_FILE = path.join(os.homedir(), '.buddy-hud', 'settings.json');
 const isLinux = process.platform === 'linux';
 const isMac = process.platform === 'darwin';
@@ -16,15 +21,38 @@ if (isLinux && process.env.XDG_SESSION_TYPE === 'wayland' && !process.argv.some(
   app.relaunch({ args: [...process.argv.slice(1), '--ozone-platform=x11'] });
   app.exit(0);
 }
-if (!app.requestSingleInstanceLock()) app.quit();
+const gotLock = app.requestSingleInstanceLock();
+if (!gotLock) app.exit(0);
 
 // ---------- state ----------
 const sessions = new Map(); // id -> session
 const pendingPerms = new Map(); // id -> { res, sessionId, tool, summary, diff }
 const stopHolds = new Map(); // sessionId -> res
 const queued = new Map(); // sessionId -> [text]
-let settings = { replyMode: false, ctxMax: 200000, scale: 1, privacy: false, pos: null };
-try { settings = { ...settings, ...JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8')) }; } catch {}
+const DEFAULTS = { phone: { enabled: false, token: '' }, replyMode: false, ctxMax: 200000, scale: 1, privacy: false, pos: null, skin: 'bot', alerts: { notify: true, sound: true, done: true, ask: true, stuck: true, dnd: false } };
+let settings = { ...DEFAULTS };
+try { const saved = JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8')); settings = { ...DEFAULTS, ...saved, alerts: { ...DEFAULTS.alerts, ...(saved.alerts || {}) } }; } catch {}
+const DAILY_FILE = path.join(os.homedir(), '.buddy-hud', 'daily.json');
+let prices = {};
+try { prices = JSON.parse(fs.readFileSync(path.join(os.homedir(), '.buddy-hud', 'prices.json'), 'utf8')); } catch {}
+let daily = { day: '', ids: {} };
+try { daily = JSON.parse(fs.readFileSync(DAILY_FILE, 'utf8')); } catch {}
+const dayKey = (d = new Date()) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+let dailyTimer;
+function updateDaily(s) {
+  const key = dayKey();
+  if (daily.day !== key) daily = { day: key, ids: {} };
+  for (const [id, v] of usageLib.todayEntries(s, key, prices)) daily.ids[id] = v;
+  clearTimeout(dailyTimer);
+  dailyTimer = setTimeout(() => { try { fs.mkdirSync(path.dirname(DAILY_FILE), { recursive: true }); fs.writeFileSync(DAILY_FILE, JSON.stringify(daily)); } catch {} }, 3000);
+}
+function dailyTotals() {
+  if (daily.day !== dayKey()) return { in: 0, out: 0, cr: 0, cw: 0, cost: 0, partial: false };
+  const t = { in: 0, out: 0, cr: 0, cw: 0, cost: 0, partial: false };
+  for (const v of Object.values(daily.ids)) { t.in += v.in; t.out += v.out; t.cr += v.cr; t.cw += v.cw; if (v.cost === null) t.partial = true; else t.cost += v.cost; }
+  return t;
+}
+let eventCount = 0, lastEventAt = 0, selfTestSeen = 0, selfTest = null;
 let win, hideTimer, seq = 0, pinned = false, userHidden = false, hooksCache = { t: 0, v: false };
 
 const saveSettings = () => {
@@ -42,6 +70,8 @@ const TOOL_EMOJI = {
 const emojiFor = (t) => TOOL_EMOJI[t] || (t && t.startsWith('mcp__') ? '🔌' : '🛠️');
 
 const addUnique = (arr, v, max = 300) => { if (!arr.includes(v)) { arr.push(v); if (arr.length > max) arr.shift(); } };
+const plainText = (t) => String(t || '').replace(/\*\*|__|`/g, '').replace(/^#{1,6}\s+/gm, '').replace(/\s*\n\s*/g, ' ').trim();
+let lastSeenAt = Date.now();
 const famOf = (m) => ((String(m || '').match(/fable|opus|sonnet|haiku/i) || [''])[0]).toLowerCase();
 
 function getSession(id, ev) {
@@ -52,7 +82,7 @@ function getSession(id, ev) {
       id, cwd: ev.cwd || '', project: path.basename(ev.cwd || '') || 'session', model: '',
       status: 'idle', note: '', tool: null, feed: [], ctx: { used: 0, max: settings.ctxMax },
       stats: { reads: 0, edits: 0, cmds: 0, other: 0 }, files: { read: [], edited: [] }, prompt: '', transcript: ev.transcript_path || '',
-      started: Date.now(), updated: Date.now(),
+      started: Date.now(), updated: Date.now(), ctxWarn: 0,
     };
     sessions.set(id, s);
   }
@@ -67,7 +97,8 @@ function getSession(id, ev) {
 const clip = (str, n = 160) => (str.length > n ? str.slice(0, n - 1) + '…' : str);
 const short = (p) => (p ? p.replace(os.homedir(), '~') : '');
 
-function summarize(tool, i = {}) {
+function summarize(tool, i) {
+  i = i && typeof i === 'object' ? i : {};
   switch (tool) {
     case 'Read': return { file: i.file_path, text: short(i.file_path) + (i.offset ? `  L${i.offset}–${i.offset + (i.limit || 2000)}` : '') };
     case 'Edit': case 'MultiEdit': case 'Write': case 'NotebookEdit':
@@ -83,10 +114,20 @@ function summarize(tool, i = {}) {
   }
 }
 
+const diffStore = new Map(); // diffId -> full diff, so the feed stays small but the diff window shows everything
+let diffSeq = 0;
+function storeDiff(full) {
+  if (!full) return null;
+  const id = ++diffSeq; diffStore.set(id, full);
+  if (diffStore.size > 60) diffStore.delete(diffStore.keys().next().value);
+  const trim = (a, n = 40) => (a.length > n ? [...a.slice(0, n), `… ${a.length - n} more lines`] : a);
+  return { ...full, diffId: id, hunks: full.hunks.map((h) => ({ ...h, del: trim(h.del), add: trim(h.add) })) };
+}
 const lines = (s) => String(s ?? '').split('\n');
-const cap = (a, n = 40) => (a.length > n ? [...a.slice(0, n), `… ${a.length - n} more lines`] : a);
+const cap = (a, n = 600) => (a.length > n ? [...a.slice(0, n), `… ${a.length - n} more lines`] : a);
 
-function buildDiff(tool, i = {}) {
+function buildDiff(tool, i) {
+  i = i && typeof i === 'object' ? i : {};
   try {
     const file = i.file_path;
     if (tool === 'Edit' || tool === 'MultiEdit') {
@@ -132,13 +173,20 @@ function readContext(s) {
       let m;
       try { m = JSON.parse(rows[k]); } catch { continue; }
       const u = m.message && m.message.usage;
-      if (!u) continue;
+      if (!u || m.message.model === '<synthetic>') continue;
+      if (!(u.input_tokens || u.cache_read_input_tokens || u.cache_creation_input_tokens || u.output_tokens)) continue;
       s.ctx.used = (u.input_tokens || 0) + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0) + (u.output_tokens || 0);
       if (m.message.model) s.model = m.message.model;
       break;
     }
   } catch {}
   s.ctx.max = /1m/i.test(s.model) || s.ctx.used > settings.ctxMax ? Math.max(1000000, settings.ctxMax) : settings.ctxMax;
+  try { usageLib.scan(s, s.transcript, prices); updateDaily(s); } catch {}
+  // context nearly full: warn once per level, re-arm after /compact or /clear
+  const pct = s.ctx.max ? (s.ctx.used / s.ctx.max) * 100 : 0;
+  if (pct < 60) s.ctxWarn = 0;
+  else if (pct >= 95 && s.ctxWarn < 2) { s.ctxWarn = 2; alertUser('stuck', `🧠 ${s.project}: context ${pct.toFixed(0)}% full`, 'Almost out of room. Run /compact or start fresh.'); }
+  else if (pct >= 85 && s.ctxWarn < 1) { s.ctxWarn = 1; alertUser('stuck', `🧠 ${s.project}: context ${pct.toFixed(0)}% full`, 'Consider /compact before it fills up.'); }
 }
 
 function lastAssistantText(s) {
@@ -171,8 +219,11 @@ function pushFeed(s, entry) {
 }
 
 function handleEvent(ev) {
+  eventCount++; lastEventAt = Date.now();
+  if (ev.session_id === '__selftest') { selfTestSeen = Date.now(); return null; }
   const id = ev.session_id || 'unknown';
   const s = getSession(id, ev);
+  s.stuckNotified = false;
   const name = ev.hook_event_name;
   let extra = null;
 
@@ -183,7 +234,8 @@ function handleEvent(ev) {
       pushFeed(s, { emoji: '🚀', text: `session ${ev.source || 'start'}`, kind: 'info' });
       break;
     case 'UserPromptSubmit':
-      s.status = 'thinking'; s.prompt = clip(ev.prompt || '', 300); s.tool = null; s.note = '';
+      s.status = 'thinking'; s.prompt = clip(ev.prompt || '', 300); s.tool = null; s.note = ''; s.summary = null;
+      s.turn = { start: Date.now(), edited: [], reads: 0, cmds: 0, errors: 0 };
       releaseStop(id);
       pushFeed(s, { emoji: '💬', text: clip(ev.prompt || '', 120), kind: 'prompt' });
       extra = takeQueued(id, 'UserPromptSubmit');
@@ -191,12 +243,14 @@ function handleEvent(ev) {
     case 'PreToolUse': {
       const tool = ev.tool_name;
       const sum = summarize(tool, ev.tool_input);
-      const diff = buildDiff(tool, ev.tool_input);
+      const diff = storeDiff(buildDiff(tool, ev.tool_input));
       s.status = 'tool';
       s.tool = { name: tool, emoji: emojiFor(tool), ...sum, diff, started: Date.now() };
       const fp = (ev.tool_input || {}).file_path || (ev.tool_input || {}).notebook_path;
-      if (fp && tool === 'Read') addUnique(s.files.read, fp);
-      else if (fp && /Edit|Write|Notebook/.test(tool)) addUnique(s.files.edited, fp);
+      if (!s.turn) s.turn = { start: Date.now(), edited: [], reads: 0, cmds: 0, errors: 0 };
+      if (fp && tool === 'Read') { addUnique(s.files.read, fp); s.turn.reads++; }
+      else if (fp && /Edit|Write|Notebook/.test(tool)) { addUnique(s.files.edited, fp); addUnique(s.turn.edited, fp); }
+      if (tool === 'Bash') s.turn.cmds++;
       if (/^Read$|^Grep$|^Glob$/.test(tool)) s.stats.reads++;
       else if (/Edit|Write|Notebook/.test(tool)) s.stats.edits++;
       else if (tool === 'Bash') s.stats.cmds++;
@@ -207,24 +261,32 @@ function handleEvent(ev) {
     case 'PostToolUse': {
       const f = s.feed.find((x) => x.toolUseId && x.toolUseId === ev.tool_use_id);
       if (f) { f.running = false; f.ms = Date.now() - f.t; }
+      const tr = ev.tool_response;
+      if (s.turn && tr && typeof tr === 'object' && (tr.is_error || tr.error || tr.interrupted)) { s.turn.errors++; if (f) f.failed = true; }
       s.tool = null; s.status = 'thinking';
       readContext(s);
       extra = takeQueued(id, 'PostToolUse');
       break;
     }
     case 'Notification':
-      s.status = 'waiting'; s.note = ev.message || 'needs your attention';
+      // a permission dialog is not an idle prompt: never offer to type into it
+      s.status = (ev.notification_type === 'permission_prompt' || /permission/i.test(ev.message || '')) ? 'permission' : 'waiting';
+      s.note = ev.message || 'needs your attention';
       pushFeed(s, { emoji: '🙋', text: clip(s.note, 140), kind: 'ask' });
-      toast(`Claude · ${s.project}`, s.note);
+      alertUser('ask', `Claude · ${s.project}`, s.note);
       break;
     case 'Stop':
       s.status = 'done'; s.tool = null; readContext(s); s.lastMsg = ev.last_assistant_message || lastAssistantText(s);
+      if (s.turn) s.summary = { ms: Date.now() - s.turn.start, edited: s.turn.edited.slice(), reads: s.turn.reads, cmds: s.turn.cmds, errors: s.turn.errors, away: Date.now() - lastSeenAt > 60000 };
+      alertUser('done', `✅ ${s.project}: Claude finished`, clip(plainText(s.lastMsg) || 'Waiting for you', 120));
       pushFeed(s, { emoji: '💬', text: clip(s.lastMsg || 'waiting for you', 120), kind: 'done' });
       break;
     case 'SubagentStop':
       pushFeed(s, { emoji: '🤖', text: 'subagent finished', kind: 'info' });
       break;
     case 'SessionEnd':
+      queued.delete(id);
+      for (const [pid, p] of pendingPerms) if (p.sessionId === id) { try { p.res.end('{}'); } catch {} pendingPerms.delete(pid); }
       releaseStop(id);
       sessions.delete(id);
       break;
@@ -232,6 +294,17 @@ function handleEvent(ev) {
   if (name !== 'SessionEnd') readContext(s);
   emit();
   return extra;
+}
+
+// Types text into the tmux pane Claude Code runs in. `--` stops tmux treating "-x" text as flags; newlines become spaces
+// so a multi-line reply cannot submit half-written. Calls back with ok=false if tmux refused.
+function typeIntoPane(s, text, cb) {
+  const base = ['-S', s.tmux.socket];
+  const one = String(text).replace(/\r?\n+/g, ' ');
+  execFile('tmux', [...base, 'send-keys', '-t', s.tmux.pane, '-l', '--', one], (err) => {
+    if (err) return cb(false);
+    setTimeout(() => execFile('tmux', [...base, 'send-keys', '-t', s.tmux.pane, 'Enter'], (e2) => cb(!e2)), 120);
+  });
 }
 
 function takeQueued(id, evName) {
@@ -256,15 +329,31 @@ function toast(title, body) {
   try { if (Notification.isSupported()) new Notification({ title, body, silent: false }).show(); } catch {}
 }
 
+// kind: 'done' | 'ask' | 'stuck'. Honours per-kind toggles, sound/notification switches and do-not-disturb.
+function alertUser(kind, title, body) {
+  const a = settings.alerts;
+  if (a.dnd || a[kind] === false) return;
+  if (a.notify) toast(title, settings.privacy ? 'Open Buddy HUD for details' : body);
+  if (a.sound && win && !win.isDestroyed()) win.webContents.send('alert', kind);
+}
+
 // ---------- HTTP bridge ----------
 const server = http.createServer((req, res) => {
   // browsers always send Origin on cross-site requests; hooks (curl) never do
   if (req.headers.origin) { res.statusCode = 403; return res.end('{}'); }
-  let body = '';
-  req.on('data', (d) => (body += d));
+  if (TEST && req.method === 'GET' && req.url === '/__state') { res.setHeader('Content-Type', 'application/json'); return res.end(JSON.stringify(snapshot())); }
+  const chunks = []; let got = 0;
+  req.on('data', (d) => { got += d.length; if (got > 5e6) { res.statusCode = 413; res.end('{}'); req.destroy(); } else chunks.push(d); });
   req.on('end', () => {
+    try { handleHook(req, res, Buffer.concat(chunks).toString('utf8')); }
+    catch (e) { console.error('hook handler error:', e); try { res.end('{}'); } catch {} } // never leave a hook hanging
+  });
+});
+
+function handleHook(req, res, body) {
     let ev;
     try { ev = JSON.parse(body); } catch { return res.end('{}'); }
+    if (!ev || typeof ev !== 'object' || Array.isArray(ev)) return res.end('{}');
     const route = req.url === '/hook'
       ? (ev.hook_event_name === 'PermissionRequest' ? '/permission' : ev.hook_event_name === 'Stop' ? '/stop' : '/event')
       : req.url;
@@ -279,7 +368,7 @@ const server = http.createServer((req, res) => {
       const q = ev.tool_name === 'ExitPlanMode' ? 'Plan ready for your review' : ((ev.tool_input && ev.tool_input.questions && ev.tool_input.questions[0] && ev.tool_input.questions[0].question) || 'Claude has a question');
       s.status = 'waiting'; s.note = clip(q, 200); s.tool = null;
       pushFeed(s, { emoji: '🙋', text: clip(q, 140), kind: 'ask' });
-      toast(`🙋 ${s.project}`, clip(q, 120));
+      alertUser('ask', `🙋 ${s.project}`, clip(q, 120));
       emit();
       return res.end('{}');
     }
@@ -288,10 +377,10 @@ const server = http.createServer((req, res) => {
       const s = getSession(id, ev);
       const tool = ev.tool_name;
       const sum = summarize(tool, ev.tool_input);
-      pendingPerms.set(pid, { res, sessionId: id, tool, emoji: emojiFor(tool), summary: sum.text, diff: buildDiff(tool, ev.tool_input), input: ev.tool_input, t: Date.now() });
+      pendingPerms.set(pid, { res, sessionId: id, tool, emoji: emojiFor(tool), summary: sum.text, diff: storeDiff(buildDiff(tool, ev.tool_input)), input: ev.tool_input, t: Date.now() });
       s.status = 'permission';
       pushFeed(s, { emoji: '🔐', text: `permission: ${tool} ${clip(sum.text, 90)}`, kind: 'ask' });
-      toast(`🔐 ${s.project}: allow ${tool}?`, clip(sum.text, 120));
+      alertUser('ask', `🔐 ${s.project}: allow ${tool}?`, clip(sum.text, 120));
       res.on('close', () => { if (!res.writableEnded && pendingPerms.delete(pid)) { if (s.status === 'permission') s.status = 'tool'; emit(); } });
       emit();
       return;
@@ -310,30 +399,64 @@ const server = http.createServer((req, res) => {
       return;
     }
     res.end(extra || '{}');
-  });
-});
+}
 server.on('error', (e) => {
   if (e.code === 'EADDRINUSE') {
     dialog.showErrorBox('Buddy HUD', `Port ${PORT} is already in use. Is Buddy HUD already running? Quit the other copy and try again.`);
     app.exit(1);
   } else throw e;
 });
-server.listen(PORT, '127.0.0.1');
+if (gotLock) server.listen(PORT, '127.0.0.1');
 
 // ---------- window ----------
-function hooksInstalled() {
+// Which of our hooks are actually present in ~/.claude/settings.json
+function hooksStatus() {
   if (Date.now() - hooksCache.t < 4000) return hooksCache.v;
-  let v = false;
-  try { v = fs.readFileSync(path.join(os.homedir(), '.claude', 'settings.json'), 'utf8').includes('127.0.0.1:47800/hook'); } catch {}
+  let present = [];
+  try {
+    const hooks = JSON.parse(fs.readFileSync(path.join(os.homedir(), '.claude', 'settings.json'), 'utf8')).hooks || {};
+    present = HOOK_EVENTS.filter((ev) => (hooks[ev] || []).some((g) => (g.hooks || []).some((h) => String(h.command || '').includes(HOOK_URL))));
+  } catch {}
+  const v = { any: present.length > 0, all: present.length === HOOK_EVENTS.length, missing: HOOK_EVENTS.filter((e) => !present.includes(e)) };
   hooksCache = { t: Date.now(), v };
   return v;
+}
+const hooksInstalled = () => hooksStatus().any;
+
+function computeHealth() {
+  const hs = hooksStatus();
+  const now = Date.now();
+  if (!hs.any) return { state: 'off', msg: 'Hooks are not installed.' };
+  if (!hs.all) return { state: 'partial', msg: `Some hooks are missing: ${hs.missing.join(', ')}.` };
+  const stuck = [...sessions.values()].find((s) => ['thinking', 'tool'].includes(s.status) && !pendingPerms.size && now - s.updated > 180000);
+  if (stuck) return { state: 'stuck', msg: `No activity from ${stuck.project} for ${Math.round((now - stuck.updated) / 60000)} min${stuck.tool ? ` (running ${stuck.tool.name})` : ''}. A long command, or stuck?` };
+  if (!eventCount) return { state: 'waiting', msg: 'Hooks installed. No events yet: start a NEW Claude Code session.' };
+  return { state: 'ok', msg: `Connected. ${eventCount} events, last ${Math.max(0, Math.round((now - lastEventAt) / 1000))}s ago.` };
+}
+
+// Runs the installed hook command for real (same curl Claude Code runs) and checks the event arrives.
+function runSelfTest() {
+  let command = '';
+  try {
+    const hooks = JSON.parse(fs.readFileSync(path.join(os.homedir(), '.claude', 'settings.json'), 'utf8')).hooks || {};
+    for (const g of hooks.Notification || []) for (const h of g.hooks || []) if (String(h.command || '').includes(HOOK_URL)) command = h.command;
+  } catch {}
+  if (!command) { selfTest = { t: Date.now(), ok: false, detail: 'No Buddy HUD hook found in ~/.claude/settings.json. Install the hooks first.' }; emit(); return; }
+  selfTest = { t: Date.now(), ok: null, detail: 'Running…' }; emit();
+  const before = selfTestSeen;
+  const child = require('child_process').exec(command, { timeout: 8000 }, (err, _out, stderr) => {
+    const ok = selfTestSeen > before;
+    selfTest = { t: Date.now(), ok, detail: ok ? 'Hook command ran and Buddy HUD received the event.' : `Hook ran but nothing arrived${err ? ' (' + String(err.message).split('\n')[0] + ')' : ''}${stderr ? ': ' + String(stderr).trim().split('\n')[0] : ''}. Is curl installed?` };
+    emit();
+  });
+  child.stdin.end(JSON.stringify({ session_id: '__selftest', hook_event_name: 'Notification', message: 'self-test' }));
 }
 
 function snapshot() {
   return {
-    settings, hooksInstalled: hooksInstalled(), version: app.getVersion(),
+    settings: { ...settings, phone: undefined }, phone: phoneInfo(), hooksInstalled: hooksInstalled(), health: computeHealth(), selfTest, daily: dailyTotals(), version: app.getVersion(),
     sessions: [...sessions.values()].sort((a, b) => b.updated - a.updated).map((s) => ({
-      ...s, canReply: stopHolds.has(s.id), canType: !!s.tmux, queued: (queued.get(s.id) || []).length,
+      ...s, _usageState: undefined, usage: s._usage || null, canReply: stopHolds.has(s.id), canType: !!s.tmux, queued: (queued.get(s.id) || []).length,
     })),
     perms: [...pendingPerms.entries()].map(([id, p]) => ({ id, sessionId: p.sessionId, tool: p.tool, emoji: p.emoji, summary: p.summary, diff: p.diff, t: p.t })),
   };
@@ -348,7 +471,7 @@ function emit() {
     const active = sessions.size > 0;
     clearTimeout(hideTimer);
     if (active) {
-      if (!win.isVisible() && (!userHidden || pendingPerms.size)) win.showInactive();
+      if (!TEST && !win.isVisible() && (!userHidden || pendingPerms.size || stopHolds.size)) win.showInactive();
     } else {
       hideTimer = setTimeout(() => { if (!sessions.size && !pinned && !process.env.HUD_KEEP && hooksInstalled()) win.hide(); }, 15000);
     }
@@ -358,7 +481,8 @@ function emit() {
 function fit(w, h) {
   if (!win || win.isDestroyed()) return;
   w *= settings.scale || 1; h *= settings.scale || 1;
-  w = Math.max(160, Math.min(520, Math.ceil(w))); h = Math.max(120, Math.min(900, Math.ceil(h)));
+  const wa = screen.getDisplayMatching(win.getBounds()).workArea;
+  w = Math.max(160, Math.min(520, Math.ceil(w))); h = Math.max(120, Math.min(wa.height - 20, Math.ceil(h)));
   const b = win.getBounds();
   if (b.width === w && b.height === h) return;
   const disp = screen.getDisplayMatching(b).workArea;
@@ -405,7 +529,7 @@ function createWindow() {
   win.webContents.on('did-finish-load', () => {
     win.webContents.setZoomFactor(settings.scale || 1);
     win.webContents.send('state', snapshot());
-    if (process.env.HUD_KEEP || sessions.size || !hooksInstalled()) win.showInactive();
+    if (!TEST && (process.env.HUD_KEEP || sessions.size || !hooksInstalled())) win.showInactive();
     if (process.env.HUD_UI) setTimeout(() => win.webContents.executeJavaScript(`__ui(${process.env.HUD_UI})`), 4500);
     if (process.env.HUD_SHOT) setTimeout(async () => {
       const img = await win.webContents.capturePage();
@@ -415,32 +539,35 @@ function createWindow() {
   });
 }
 
-ipcMain.on('decide', (_e, { id, behavior }) => {
+function decidePerm(id, behavior) {
   const p = pendingPerms.get(id);
   if (!p) return;
   pendingPerms.delete(id);
   const s = sessions.get(p.sessionId);
-  if (s) s.status = behavior === 'terminal' ? 'permission' : 'tool';
+  if (s) s.status = behavior === 'terminal' ? 'waiting' : 'tool';
   if (behavior === 'allow') p.res.end(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PermissionRequest', decision: { behavior: 'allow' } } }));
   else if (behavior === 'deny') p.res.end(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PermissionRequest', decision: { behavior: 'deny', message: 'Denied by the user from the Buddy HUD overlay.' } } }));
   else p.res.end('{}'); // fall back to the terminal dialog
   emit();
-});
-ipcMain.on('reply', (_e, { sessionId, text }) => {
+}
+function sendReply(sessionId, text) {
   const res = stopHolds.get(sessionId);
   if (res) {
     stopHolds.delete(sessionId);
     res.end(JSON.stringify({ decision: 'block', reason: `The user replied via the Buddy HUD desktop overlay:\n${text}` }));
     const s = sessions.get(sessionId);
     if (s) { s.status = 'thinking'; pushFeed(s, { emoji: '📨', text: clip(text, 120), kind: 'prompt' }); }
-  } else if (sessions.get(sessionId) && sessions.get(sessionId).tmux && ['done', 'waiting', 'idle'].includes(sessions.get(sessionId).status)) {
+  } else if (sessions.get(sessionId) && sessions.get(sessionId).tmux && ['done', 'idle'].includes(sessions.get(sessionId).status)) {
     // Claude idle at its prompt inside tmux: type the reply straight into the pane
     const s = sessions.get(sessionId);
-    const base = ['-S', s.tmux.socket];
-    execFile('tmux', [...base, 'send-keys', '-t', s.tmux.pane, '-l', text], () =>
-      setTimeout(() => execFile('tmux', [...base, 'send-keys', '-t', s.tmux.pane, 'Enter'], () => {}), 120));
-    s.status = 'thinking';
-    pushFeed(s, { emoji: '📨', text: clip(text, 120), kind: 'prompt' });
+    typeIntoPane(s, text, (ok) => {
+      if (ok) { s.status = 'thinking'; pushFeed(s, { emoji: '📨', text: clip(text, 120), kind: 'prompt' }); }
+      else {
+        const q = queued.get(sessionId) || []; q.push(text); queued.set(sessionId, q);
+        pushFeed(s, { emoji: '📬', text: 'tmux refused the text, queued instead: ' + clip(text, 80), kind: 'prompt' });
+      }
+      emit();
+    });
   } else {
     const q = queued.get(sessionId) || [];
     q.push(text);
@@ -449,11 +576,92 @@ ipcMain.on('reply', (_e, { sessionId, text }) => {
     if (s) pushFeed(s, { emoji: '📬', text: 'queued: ' + clip(text, 100), kind: 'prompt' });
   }
   emit();
+}
+ipcMain.on('decide', (_e, { id, behavior }) => decidePerm(id, behavior));
+ipcMain.on('reply', (_e, { sessionId, text }) => sendReply(sessionId, text));
+const knownFile = (p) => typeof p === 'string' && path.isAbsolute(p) && (
+  [...sessions.values()].some((s) => s.files.read.includes(p) || s.files.edited.includes(p)) || (currentDiff && currentDiff.file === p));
+ipcMain.on('openFile', (_e, p) => { if (knownFile(p) && fs.existsSync(p)) shell.openPath(p); });
+
+let diffWin = null, currentDiff = null;
+ipcMain.handle('diff:get', () => currentDiff);
+ipcMain.on('openDiff', (_e, id) => {
+  const d = diffStore.get(+id);
+  if (!d) return;
+  currentDiff = d;
+  if (diffWin && !diffWin.isDestroyed()) { diffWin.loadFile(path.join(__dirname, 'renderer', 'diff.html')); diffWin.show(); return; }
+  diffWin = new BrowserWindow({ width: 920, height: 700, title: 'Buddy HUD diff', backgroundColor: '#181513', autoHideMenuBar: true, icon: path.join(__dirname, 'build', 'icon.png'), webPreferences: { preload: path.join(__dirname, 'preload-diff.js'), contextIsolation: true } });
+  diffWin.loadFile(path.join(__dirname, 'renderer', 'diff.html'));
 });
+
+// ---------- phone access (opt-in, LAN only, token protected) ----------
+let phoneServer = null, phoneQr = '';
+const phoneFails = new Map();
+const lanIp = () => { for (const list of Object.values(os.networkInterfaces())) for (const i of list || []) if (i.family === 'IPv4' && !i.internal) return i.address; return '127.0.0.1'; };
+function phoneUrl() { return `http://${lanIp()}:47801/?t=${settings.phone.token}`; }
+function phoneInfo() { return settings.phone && settings.phone.enabled ? { enabled: true, url: phoneUrl(), qr: phoneQr } : { enabled: false }; }
+function tokenOk(t) {
+  const a = Buffer.from(String(t || '')), b = Buffer.from(String(settings.phone.token));
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+function startPhone() {
+  if (phoneServer || (TEST && !process.env.HUD_PHONE)) return;
+  if (!settings.phone) settings.phone = {};
+  if (!settings.phone.token) settings.phone.token = crypto.randomBytes(16).toString('hex');
+  settings.phone.enabled = true; saveSettings();
+  require('qrcode').toDataURL(phoneUrl(), { margin: 1, width: 220 }).then((d) => { phoneQr = d; emit(); }).catch(() => {});
+  phoneServer = http.createServer((req, res) => {
+    const u = new URL(req.url, 'http://x');
+    const ip = req.socket.remoteAddress;
+    const fails = phoneFails.get(ip) || { n: 0, t: Date.now() };
+    if (Date.now() - fails.t > 60000) { fails.n = 0; fails.t = Date.now(); }
+    if (fails.n >= 10) { res.statusCode = 429; return res.end('too many attempts'); }
+    if (!tokenOk(u.searchParams.get('t'))) { fails.n++; phoneFails.set(ip, fails); res.statusCode = 403; return res.end('forbidden'); }
+    const json = (o) => { res.setHeader('Content-Type', 'application/json'); res.setHeader('Cache-Control', 'no-store'); res.end(JSON.stringify(o)); };
+    if (req.method === 'GET' && u.pathname === '/') { res.setHeader('Content-Type', 'text/html; charset=utf-8'); return res.end(fs.readFileSync(path.join(__dirname, 'renderer', 'phone.html'))); }
+    if (req.method === 'GET' && u.pathname === '/api/state') {
+      const snap = snapshot();
+      return json({
+        sessions: snap.sessions.map((s) => ({ id: s.id, project: s.project, status: s.status, model: s.model, tool: s.tool && { name: s.tool.name, text: s.tool.text }, lastMsg: s.lastMsg })),
+        perms: snap.perms.map((p) => ({ id: p.id, tool: p.tool, summary: p.summary, project: (sessions.get(p.sessionId) || {}).project })),
+      });
+    }
+    if (req.method === 'POST' && (u.pathname === '/api/decide' || u.pathname === '/api/reply')) {
+      let body = '';
+      req.on('data', (d) => { body += d; if (body.length > 1e5) req.destroy(); });
+      req.on('end', () => {
+        try {
+          const o = JSON.parse(body);
+          if (u.pathname === '/api/decide' && ['allow', 'deny', 'terminal'].includes(o.behavior)) decidePerm(String(o.id), o.behavior);
+          else if (u.pathname === '/api/reply' && o.text && String(o.text).length < 4000) sendReply(String(o.sessionId), String(o.text));
+        } catch {}
+        json({ ok: true });
+      });
+      return;
+    }
+    res.statusCode = 404; res.end('not found');
+  });
+  phoneServer.on('error', (e) => { settings.phone.enabled = false; saveSettings(); phoneServer = null; toast('Buddy HUD', 'Phone access could not start: ' + e.code); emit(); });
+  phoneServer.listen(47801, '0.0.0.0', () => emit());
+}
+function stopPhone() {
+  if (settings.phone) { settings.phone.enabled = false; saveSettings(); }
+  if (phoneServer) { phoneServer.close(); phoneServer.closeAllConnections && phoneServer.closeAllConnections(); phoneServer = null; }
+  phoneQr = ''; emit();
+}
+ipcMain.on('phone', (_e, { enabled, regenerate }) => {
+  if (regenerate) { settings.phone = { ...(settings.phone || {}), token: crypto.randomBytes(16).toString('hex') }; saveSettings(); if (phoneServer) { stopPhone(); startPhone(); return; } }
+  if (enabled) startPhone(); else stopPhone();
+});
+
 ipcMain.on('release', (_e, sessionId) => { releaseStop(sessionId); emit(); });
 ipcMain.on('fit', (_e, { w, h }) => fit(w, h));
+ipcMain.on('seen', () => { lastSeenAt = Date.now(); });
+ipcMain.on('selfTest', () => runSelfTest());
 ipcMain.on('set', (_e, patch) => {
+  if (patch.alerts) patch = { ...patch, alerts: { ...settings.alerts, ...patch.alerts } };
   settings = { ...settings, ...patch };
+  if (patch.alerts) refreshTray();
   saveSettings();
   if (!settings.replyMode) for (const id of [...stopHolds.keys()]) releaseStop(id);
   if ('scale' in patch && win) { win.webContents.setZoomFactor(settings.scale || 1); lastFitW = 0; win.webContents.send('refit'); }
@@ -477,13 +685,20 @@ app.on('second-instance', () => { if (win) { pinned = true; win.showInactive(); 
 // drop sessions whose Claude Code process died without sending SessionEnd
 setInterval(() => {
   let changed = false;
+  for (const s of sessions.values()) {
+    if (['thinking', 'tool'].includes(s.status) && !pendingPerms.size && !s.stuckNotified && Date.now() - s.updated > 180000) {
+      s.stuckNotified = true; changed = true;
+      pushFeed(s, { emoji: '⏳', text: `no activity for 3 min${s.tool ? ' (' + s.tool.name + ')' : ''}`, kind: 'info' });
+      alertUser('stuck', `⏳ ${s.project}: seems stuck`, 'No activity for 3 minutes. A long command, or stuck?');
+    }
+  }
   for (const [id, s] of sessions) {
-    if (Date.now() - s.updated > 45 * 60 * 1000 && !stopHolds.has(id)) { sessions.delete(id); changed = true; }
+    if (Date.now() - s.updated > 45 * 60 * 1000 && !stopHolds.has(id) && ![...pendingPerms.values()].some((p) => p.sessionId === id)) { sessions.delete(id); queued.delete(id); changed = true; }
   }
   if (changed) emit();
-}, 30000);
+}, 15000);
 
-let tray;
+let tray, refreshTray = () => {};
 function buildTray() {
   try {
     const img = nativeImage.createFromPath(path.join(__dirname, 'build', isMac ? 'tray.png' : 'tray@2x.png'));
@@ -492,12 +707,14 @@ function buildTray() {
   const refresh = () => tray.setContextMenu(Menu.buildFromTemplate([
     { label: 'Show / hide buddy', click: () => { if (win.isVisible()) { pinned = false; userHidden = true; win.hide(); } else { pinned = true; userHidden = false; win.showInactive(); } } },
     { label: 'Install Claude Code hooks', click: () => { try { toast('Buddy HUD', require('./install-hooks').run(false)); } catch (e) { toast('Buddy HUD', 'Hook install failed: ' + e.message); } } },
+    { label: 'Run hook self-test', click: () => runSelfTest() },
+    { label: 'Do not disturb', type: 'checkbox', checked: settings.alerts.dnd, click: () => { settings.alerts.dnd = !settings.alerts.dnd; saveSettings(); refreshTray(); emit(); } },
     { label: 'Remove Claude Code hooks', click: () => { try { toast('Buddy HUD', require('./install-hooks').run(true)); } catch (e) { toast('Buddy HUD', 'Hook removal failed: ' + e.message); } } },
     { label: 'Start at login', type: 'checkbox', checked: app.getLoginItemSettings().openAtLogin, click: (i) => { app.setLoginItemSettings({ openAtLogin: i.checked }); refresh(); } },
     { type: 'separator' },
     { label: 'Quit', click: () => app.quit() },
   ]));
-  refresh();
+  refresh(); refreshTray = refresh;
   tray.setToolTip('Buddy HUD');
   tray.on('click', () => { if (win.isVisible()) { pinned = false; userHidden = true; win.hide(); } else { pinned = true; userHidden = false; win.showInactive(); } });
 }
@@ -505,9 +722,10 @@ function buildTray() {
 app.whenReady().then(async () => {
   Menu.setApplicationMenu(null);
   if (isMac && app.dock) app.dock.hide();
-  const firstRun = !fs.existsSync(SETTINGS_FILE);
+  const firstRun = !TEST && !fs.existsSync(SETTINGS_FILE);
   createWindow();
-  buildTray();
+  if (!TEST) buildTray();
+  if (settings.phone && settings.phone.enabled) { settings.phone.enabled = false; startPhone(); }
   if (firstRun) {
     saveSettings();
     app.setLoginItemSettings({ openAtLogin: true });

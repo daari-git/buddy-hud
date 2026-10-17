@@ -9,8 +9,11 @@ process.env.HOME = home; process.env.USERPROFILE = home;
 const settingsPath = path.join(home, '.claude', 'settings.json');
 const { run } = require('../install-hooks');
 
-// 1. fresh install on a machine with no settings file
+// 1. install over an existing settings file (backup is made once, never overwritten)
+fs.mkdirSync(path.dirname(settingsPath), { recursive: true });
+fs.writeFileSync(settingsPath, JSON.stringify({ theme: 'dark' }));
 run(false);
+assert.strictEqual(JSON.parse(fs.readFileSync(settingsPath + '.bak-buddy-hud', 'utf8')).theme, 'dark');
 let s = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
 for (const ev of ['PreToolUse', 'PostToolUse', 'Stop', 'PermissionRequest', 'SessionStart', 'SessionEnd', 'UserPromptSubmit', 'Notification', 'SubagentStop'])
   assert.ok(s.hooks[ev], 'missing hook ' + ev);
@@ -37,6 +40,8 @@ s = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
 assert.ok(s.hooks.PreToolUse.every((g) => g.hooks.every((h) => !h.command.includes('47800'))));
 assert.ok(s.hooks.PreToolUse.some((g) => g.hooks.some((h) => h.command === 'echo mine')));
 assert.ok(!s.hooks.Stop, 'Stop hook should be gone');
-assert.ok(fs.existsSync(settingsPath + '.bak-buddy-hud'));
+assert.strictEqual(JSON.parse(fs.readFileSync(settingsPath + '.bak-buddy-hud', 'utf8')).theme, 'dark', 'backup stays pristine across runs');
+fs.writeFileSync(settingsPath, '   ');
+assert.doesNotThrow(() => run(false), 'empty settings.json is treated as {}');
 
 console.log('install-hooks: all tests passed');

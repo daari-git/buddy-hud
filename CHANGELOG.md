@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.0
+
+- Health indicator and hook self-test; end-to-end test suite that drives the real app (runs in CI).
+- Sound and desktop alerts with per-alert switches and do-not-disturb; "seems stuck" and context-full warnings; elapsed timers.
+- Token and estimated cost tracking per session and per day.
+- Click files to open them, full diff window, "while you were away" summary.
+- Optional phone approvals over LAN; Bot, Cat and Classic looks.
+- Audit fixes: a malformed hook body can no longer hang Claude Code; tmux replies are escaped and never typed into permission dialogs; reply box follows the session that needs you; hidden window reappears for holds; atomic settings writes with a backup that is never overwritten; Windows hook command; multibyte-safe request bodies; stale pick/queue cleanup.
+
 ## 0.1.2
 
 - Removed the in-app model switcher: Claude Code cannot be driven reliably from outside, so it never matched the terminal. The buddy still shows and tints to the model actually in use.

@@ -1,6 +1,6 @@
 {
   "name": "buddy-hud",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "A floating pixel buddy that shows what Claude Code is doing - live diffs, permissions, context, replies. Unofficial.",
   "main": "main.js",
   "scripts": {
@@ -12,7 +12,9 @@
     "dist:mac": "electron-builder --mac",
     "dist:win": "electron-builder --win",
     "promo": "electron promo/record.js portrait promo/out.mp4",
-    "test": "node test/install-hooks.test.js"
+    "test": "node test/install-hooks.test.js && node test/usage.test.js && node test/e2e.js",
+    "test:unit": "node test/install-hooks.test.js",
+    "test:e2e": "node test/e2e.js"
   },
   "license": "MIT",
   "devDependencies": {
@@ -41,7 +43,9 @@
     "files": [
       "main.js",
       "preload.js",
+      "preload-diff.js",
       "install-hooks.js",
+      "lib/**",
       "renderer/**",
       "build/icon.png",
       "build/tray.png",
@@ -81,5 +85,8 @@
       "oneClick": true,
       "perMachine": false
     }
+  },
+  "dependencies": {
+    "qrcode": "^1.5.4"
   }
 }

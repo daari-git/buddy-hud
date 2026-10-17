@@ -1,6 +1,6 @@
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-const fmt = (n) => (n >= 1000 ? (n / 1000).toFixed(n >= 100000 ? 0 : 1) + 'k' : String(n));
+const fmt = (n) => (n >= 1e6 ? (n / 1e6).toFixed(n >= 1e7 ? 0 : 1) + 'M' : n >= 1000 ? (n / 1000).toFixed(n >= 100000 ? 0 : 1) + 'k' : String(n));
 const ago = (t) => { const s = Math.max(0, (Date.now() - t) / 1000 | 0); return s < 60 ? s + 's' : s < 3600 ? (s / 60 | 0) + 'm' : (s / 3600 | 0) + 'h'; };
 
 const VERB = { Read: 'Reading', Edit: 'Editing', MultiEdit: 'Editing', Write: 'Writing', NotebookEdit: 'Editing notebook', Bash: 'Running command', Grep: 'Searching', Glob: 'Finding files', WebFetch: 'Fetching page', WebSearch: 'Searching the web', Task: 'Delegating to agent', Agent: 'Delegating to agent', TodoWrite: 'Planning' };
@@ -52,6 +52,38 @@ let drawer = false;
 const open = new Set();
 let lastFit = '';
 
+// ---------- sound alerts (WebAudio, no files) ----------
+let actx;
+function chime(kind) {
+  try {
+    actx = actx || new (window.AudioContext || window.webkitAudioContext)();
+    const notes = { done: [[660, 0], [880, .13]], ask: [[880, 0], [660, .12], [880, .24]], stuck: [[330, 0], [247, .18]] }[kind] || [[660, 0]];
+    for (const [f, d] of notes) {
+      const o = actx.createOscillator(), g = actx.createGain();
+      o.type = kind === 'stuck' ? 'triangle' : 'sine'; o.frequency.value = f;
+      const t = actx.currentTime + d;
+      g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.18, t + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.28);
+      o.connect(g); g.connect(actx.destination); o.start(t); o.stop(t + 0.3);
+    }
+  } catch {}
+}
+hud.onAlert(chime);
+let seenAt = 0;
+addEventListener('mousemove', () => { if (Date.now() - seenAt > 4000) { seenAt = Date.now(); hud.send('seen'); } });
+// live clocks are filled in by a 1s ticker instead of re-rendering, so buttons never get replaced under the cursor
+function tickClock() {
+  document.querySelectorAll('.el').forEach((el) => { el.textContent = '⏱ ' + dur(Date.now() - +el.dataset.since); });
+  document.querySelectorAll('.ago').forEach((el) => { el.textContent = ago(+el.dataset.t); });
+}
+setInterval(tickClock, 1000);
+const dur = (ms) => { const s = Math.max(0, Math.round(ms / 1000)); return s < 60 ? s + 's' : s < 3600 ? Math.floor(s / 60) + 'm ' + (s % 60) + 's' : Math.floor(s / 3600) + 'h ' + Math.floor((s % 3600) / 60) + 'm'; };
+
+// open files / full diffs from anywhere in the UI (paths are re-validated in the main process)
+document.addEventListener('click', (e) => {
+  const o = e.target.closest('[data-open]'); if (o) { e.stopPropagation(); hud.send('openFile', o.dataset.open); return; }
+  const d = e.target.closest('[data-diff]'); if (d) { e.stopPropagation(); hud.send('openDiff', d.dataset.diff); }
+}, true);
+
 // ---------- drag / click ----------
 function dragger(el, onClick) {
   el.addEventListener('mousedown', (e) => {
@@ -70,8 +102,12 @@ $('btnQuit').onclick = () => hud.send('quit');
 $('optReply').onchange = (e) => hud.send('set', { replyMode: e.target.checked });
 $('optCtx').onchange = (e) => hud.send('set', { ctxMax: +e.target.value });
 $('optScale').onchange = (e) => hud.send('set', { scale: +e.target.value });
+$('optSkin').onchange = (e) => hud.send('set', { skin: e.target.value });
+$('optPhone').onchange = (e) => hud.send('phone', { enabled: e.target.checked });
 $('optPrivacy').onchange = (e) => hud.send('set', { privacy: e.target.checked });
 $('btnHide').onclick = () => hud.send('hide');
+for (const [id, key] of [['alNotify', 'notify'], ['alSound', 'sound'], ['alDone', 'done'], ['alAsk', 'ask'], ['alStuck', 'stuck'], ['alDnd', 'dnd']])
+  $(id).onchange = (e) => { hud.send('set', { alerts: { [key]: e.target.checked } }); if (key === 'sound' && e.target.checked) chime('done'); };
 hud.onRefit(() => { lastFit = ''; fit(); });
 
 // ---------- reply ----------
@@ -96,7 +132,7 @@ function diffHtml(d, max = 14) {
     const take = (arr, cls, sign) => arr.slice(0, Math.max(0, budget)).map((l) => { budget--; return `<div class="l ${cls}">${sign} ${esc(l)}</div>`; }).join('');
     return head + take(h.del, 'del', '-') + take(h.add, 'add', '+');
   }).join('');
-  return `<div class="diff">${out}</div>`;
+  return `<div class="diff">${out}</div>${d.diffId ? `<div><button class="linkbtn" data-diff="${d.diffId}">Open full diff ↗</button></div>` : ''}`;
 }
 
 function actFor(s, perms) {
@@ -120,6 +156,10 @@ function render() {
   const ss = state.sessions;
   ss.forEach((x) => { x.files = x.files || { read: [], edited: [] }; });
   if (!ss.find((s) => s.id === selected)) selected = ss[0] ? ss[0].id : null;
+  // a session holding a reply or a permission must never hide behind another tab
+  const needy = state.perms.length ? ss.find((x) => x.id === state.perms[0].sessionId) : ss.find((x) => x.canReply);
+  const cur0 = ss.find((x) => x.id === selected);
+  if (needy && cur0 && !cur0.canReply && !state.perms.some((p) => p.sessionId === cur0.id)) selected = needy.id;
   const s = ss.find((x) => x.id === selected);
   const perms = state.perms;
   const a = actFor(s, perms);
@@ -135,6 +175,7 @@ function render() {
   $('modelTag').hidden = !s; $('modelTag').querySelector('span').textContent = label;
 
   const svg = $('clawd');
+  svg.dataset.skin = (state.settings && state.settings.skin) || 'bot';
   svg.dataset.act = a.act; svg.dataset.eyes = a.eyes; svg.dataset.look = a.look;
   $('item').textContent = a.item; $('item2').textContent = a.item2;
 
@@ -145,6 +186,10 @@ function render() {
   $('pillPct').textContent = s ? `${pct.toFixed(0)}% · ${fmt(s.ctx.used)}` : '—';
   $('pillSub').textContent = s ? `📖 ${s.files.read.length}  ✏️ ${s.files.edited.length}  💻 ${s.stats.cmds}` : 'no session';
   $('pill').title = s ? `${s.files.read.length} files read · ${s.files.edited.length} files edited · ${s.stats.cmds} commands` : '';
+
+  // health
+  const hl = state.health || { state: 'ok', msg: '' };
+  $('hdot').className = hl.state; $('hdot').title = hl.msg;
 
   // permission bubbles
   setHtml($('perms'), perms.map((p) => {
@@ -159,18 +204,20 @@ function render() {
   const act = $('action');
   let html = '';
   if (s && s.tool && !perms.length) {
-    html = `<div class="h"><span class="dot"></span>${s.tool.emoji} <span>${VERB[s.tool.name] || esc(s.tool.name)}</span><span class="grow"></span><span class="dim">${ago(s.tool.started)}</span></div><div class="sub">${esc(s.tool.text)}</div>${diffHtml(s.tool.diff, 10)}`;
+    html = `<div class="h"><span class="dot"></span>${s.tool.emoji} <span>${VERB[s.tool.name] || esc(s.tool.name)}</span><span class="grow"></span><span class="dim el" data-since="${(s.turn && s.turn.start) || s.tool.started}"></span></div><div class="sub">${esc(s.tool.text)}</div>${diffHtml(s.tool.diff, 10)}`;
   } else if (s && !perms.length) {
     const last = s.feed.find((f) => f.kind === 'tool' && !f.running);
     const recent = last && Date.now() - (last.t + (last.ms || 0)) < 3500;
     if (s.status === 'done') {
-      html = `<div class="h">💬 <span>Claude</span><span class="grow"></span><span class="dim">${s.files.edited.length} edited · ${s.files.read.length} read · ${s.stats.cmds} cmds</span></div>${s.lastMsg ? `<div class="say">${md(s.lastMsg)}</div>` : ''}`;
+      const sm = s.summary;
+      const sumHtml = sm ? `<div class="sum">${sm.away ? `<span class="away">While you were away (${dur(sm.ms)})</span>` : ''}<span class="pillx">⏱ ${dur(sm.ms)}</span>${sm.edited.slice(0, 6).map((p) => `<span class="pillx" data-open="${esc(p)}" title="${esc(p)}">✏️ ${esc(base(p))}</span>`).join('')}${sm.edited.length > 6 ? `<span class="pillx">+${sm.edited.length - 6} more</span>` : ''}<span class="pillx">📖 ${sm.reads} read</span><span class="pillx">💻 ${sm.cmds} cmd${sm.cmds === 1 ? '' : 's'}</span>${sm.errors ? `<span class="pillx bad">⚠️ ${sm.errors} error${sm.errors === 1 ? '' : 's'}</span>` : ''}</div>` : '';
+      html = `<div class="h">💬 <span>Claude</span></div>${sumHtml}${s.lastMsg ? `<div class="say">${md(s.lastMsg)}</div>` : ''}`;
     } else if (s.status === 'waiting') {
       html = `<div class="h">🙋 <span>${esc(s.note || 'Needs you')}</span></div>`;
     } else if (s.status === 'thinking' && recent) {
       html = `<div class="fade"><div class="h">✓ ${last.emoji} <span>${esc(last.tool)}</span></div><div class="sub">${esc(last.text)}</div></div>`;
     } else if (s.status === 'thinking') {
-      html = `<div class="h"><span class="dot"></span>💭 <span>Thinking…</span></div>${s.prompt ? `<div class="sub">${esc(s.prompt)}</div>` : ''}`;
+      html = `<div class="h"><span class="dot"></span>💭 <span>Thinking…</span><span class="grow"></span><span class="dim el" data-since="${(s.turn && s.turn.start) || Date.now()}"></span></div>${s.prompt ? `<div class="sub">${esc(s.prompt)}</div>` : ''}`;
     }
   }
   act.hidden = !html || drawer;
@@ -183,13 +230,30 @@ function render() {
     $('optCtx').value = String(state.settings.ctxMax || 200000);
     $('optScale').value = String(state.settings.scale || 1);
     $('optPrivacy').checked = !!state.settings.privacy;
+    $('optSkin').value = (state.settings && state.settings.skin) || 'bot';
+    const ph = state.phone || {};
+    $('optPhone').checked = !!ph.enabled;
+    $('phoneBox').hidden = !ph.enabled;
+    setHtml($('phoneBox'), ph.enabled ? `${ph.qr ? `<img alt="QR" src="${ph.qr}">` : ''}<div><div class="url">${esc(ph.url)}</div><div class="warn">Anyone on this Wi-Fi who has this link can approve commands. Use only on networks you trust. <button class="linkbtn" id="phoneNew">New link</button></div></div>` : '');
+    if ($('phoneNew')) $('phoneNew').onclick = () => hud.send('phone', { enabled: true, regenerate: true });
+    // usage
+    const u = s && s.usage, dd = state.daily;
+    const money = (c, partial) => '≈$' + c.toFixed(c < 10 ? 2 : 1) + (partial ? '+' : '');
+    setHtml($('usage'), s ? `<div class="row"><span>Tokens this session</span><span>${u ? `${fmt(u.in + u.cacheRead + u.cacheWrite)} in · ${fmt(u.out)} out` : '—'}</span></div><div class="row"><span>Estimated cost</span><span title="${u && u.unpriced.length ? 'No price known for: ' + esc(u.unpriced.join(', ')) + '. Add prices in ~/.buddy-hud/prices.json' : 'Uses public list prices'}">${u ? (u.cost > 0 || !u.unpriced.length ? money(u.cost, u.unpriced.length) : 'price unknown') + (u.unpriced.length ? ' (some models unpriced)' : '') : '—'}</span></div><div class="row"><span>Today (all sessions)</span><span>${dd ? `${fmt(dd.in + dd.cr + dd.cw)} in · ${fmt(dd.out)} out · ${dd.cost > 0 || !dd.partial ? money(dd.cost, dd.partial) : 'price unknown'}` : '—'}</span></div>` : '');
     $('ver').textContent = 'Buddy HUD v' + (state.version || '');
+    const st = state.selfTest;
+    setHtml($('health'), `<span class="msg">${hl.state === 'ok' ? '🟢' : hl.state === 'waiting' ? '⚪' : hl.state === 'off' ? '🔴' : '🟠'} ${esc(hl.msg)}</span>${hl.state === 'off' || hl.state === 'partial' ? '<button id="btnFix">Fix</button>' : ''}<button id="btnSelf">Self-test</button>${st ? `<span class="st">${st.ok === null ? '⏳' : st.ok ? '✅' : '❌'} ${esc(st.detail)}</span>` : ''}`);
+    $('btnSelf').onclick = () => hud.send('selfTest');
+    if ($('btnFix')) $('btnFix').onclick = () => hud.send('installHooks');
+    const al = (state.settings && state.settings.alerts) || {};
+    $('alNotify').checked = al.notify !== false; $('alSound').checked = al.sound !== false; $('alDone').checked = al.done !== false;
+    $('alAsk').checked = al.ask !== false; $('alStuck').checked = al.stuck !== false; $('alDnd').checked = !!al.dnd;
     $('tabs').hidden = ss.length < 2;
-    setHtml($('tabs'), ss.map((x) => `<button data-id="${x.id}" class="${x.id === selected ? 'on' : ''}">${esc(x.project)}</button>`).join(''));
+    setHtml($('tabs'), ss.map((x) => `<button data-id="${esc(x.id)}" class="${x.id === selected ? 'on' : ''}">${esc(x.project)}</button>`).join(''));
     $('tabs').querySelectorAll('button').forEach((b) => (b.onclick = () => { selected = b.dataset.id; render(); }));
     setHtml($('chips'), s ? `<span class="chip">🧠 ${fmt(s.ctx.used)} / ${fmt(s.ctx.max)}</span><span class="chip">📖 ${s.stats.reads} reads</span><span class="chip">✏️ ${s.stats.edits} edits</span><span class="chip">💻 ${s.stats.cmds} cmds</span><span class="chip">🛠️ ${s.stats.other} other</span><span class="chip proj">${esc(s.project)}</span>` : '');
-    setHtml($('files'), s ? `<div><div class="fh">✏️ Edited — ${s.files.edited.length} file${s.files.edited.length === 1 ? '' : 's'}</div><div class="fl ed">${s.files.edited.slice(-12).reverse().map((p) => `<span title="${esc(p)}">${esc(base(p))}</span>`).join('') || '<span>none yet</span>'}</div></div><div><div class="fh">📖 Read — ${s.files.read.length} file${s.files.read.length === 1 ? '' : 's'}</div><div class="fl">${s.files.read.slice(-12).reverse().map((p) => `<span title="${esc(p)}">${esc(base(p))}</span>`).join('') || '<span>none yet</span>'}</div></div>` : '');
-    setHtml($('feed'), s ? s.feed.map((f) => `<div class="item ${f.kind || ''}" data-id="${f.id}"><span class="e">${f.running ? '⏳' : f.emoji}</span><span class="t">${f.tool ? `<b>${esc(f.tool)}</b> ` : ''}${esc(plain(f.text))}</span><span class="m">${f.ms != null ? f.ms + 'ms · ' : ''}${ago(f.t)}</span>${f.diff && open.has(f.id) ? diffHtml(f.diff, 30) : ''}</div>`).join('') : '');
+    setHtml($('files'), s ? `<div><div class="fh">✏️ Edited — ${s.files.edited.length} file${s.files.edited.length === 1 ? '' : 's'}</div><div class="fl ed">${s.files.edited.slice(-12).reverse().map((p) => `<span data-open="${esc(p)}" title="${esc(p)}">${esc(base(p))}</span>`).join('') || '<span>none yet</span>'}</div></div><div><div class="fh">📖 Read — ${s.files.read.length} file${s.files.read.length === 1 ? '' : 's'}</div><div class="fl">${s.files.read.slice(-12).reverse().map((p) => `<span data-open="${esc(p)}" title="${esc(p)}">${esc(base(p))}</span>`).join('') || '<span>none yet</span>'}</div></div>` : '');
+    setHtml($('feed'), s ? s.feed.map((f) => `<div class="item ${f.kind || ''}" data-id="${f.id}"><span class="e">${f.running ? '⏳' : f.emoji}</span><span class="t">${f.tool ? `<b>${esc(f.tool)}</b> ` : ''}${esc(plain(f.text))}</span><span class="m">${f.ms != null ? f.ms + 'ms · ' : ''}<span class="ago" data-t="${f.t}"></span></span>${f.diff && open.has(f.id) ? diffHtml(f.diff, 30) : ''}</div>`).join('') : '');
     $('feed').querySelectorAll('.item').forEach((el) => (el.onclick = () => { const id = +el.dataset.id; open.has(id) ? open.delete(id) : open.add(id); render(); }));
   }
 
@@ -206,13 +270,14 @@ function render() {
 
   // reply bubble (auto when Claude waits, or in drawer)
   const can = s && s.canReply;
-  const idle = s && ['done', 'waiting'].includes(s.status);
+  const idle = s && s.status === 'done';
   const showReply = !!s && (can || drawer || (idle && s.canType));
   $('reply').hidden = !showReply;
   $('replyHint').className = 'hint' + (can ? ' live' : '');
   $('replyHint').textContent = can ? '🟢 Claude is waiting — reply goes straight into the session' : idle && s.canType ? '⌨️ typed into your tmux pane' : '📬 queued — delivered at Claude’s next step (type in terminal if idle)';
   $('btnSkip').hidden = !can;
 
+  tickClock();
   requestAnimationFrame(fit);
 }
 
@@ -226,7 +291,7 @@ new ResizeObserver(fit).observe($('stage'));
 
 hud.onState((s) => { state = s; render(); });
 window.__push = (s) => { state = s; render(); };
-window.__ui = (o) => { if ('drawer' in o) drawer = o.drawer; render(); };
+window.__ui = (o) => { if (o.set) hud.send('set', o.set); if ('drawer' in o) drawer = o.drawer; render(); };
 setInterval(render, 1500);
 render();
 

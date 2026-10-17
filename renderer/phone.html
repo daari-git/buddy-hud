@@ -1,0 +1,48 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Buddy HUD</title>
+<style>
+  :root { color-scheme: dark; --o: #d97757; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #14110f; color: #f4eee8; font: 16px/1.45 system-ui, "Noto Color Emoji", sans-serif; padding: 14px; max-width: 640px; margin: 0 auto; }
+  h1 { font-size: 18px; margin: 4px 0 12px; display: flex; gap: 8px; align-items: center; }
+  .card { background: #221e1b; border: 1px solid #ffffff1a; border-radius: 16px; padding: 12px 14px; margin-bottom: 12px; }
+  .perm { border-color: #f2b84b; }
+  .dim { color: #a79d92; font-size: 13px; }
+  code, pre { font: 13px ui-monospace, monospace; background: #00000050; border-radius: 6px; padding: 1px 5px; }
+  pre { padding: 8px; white-space: pre-wrap; word-break: break-word; }
+  .row { display: flex; gap: 8px; margin-top: 10px; }
+  button { flex: 1; font: inherit; color: #fff; border: 0; border-radius: 12px; padding: 12px; background: #ffffff1a; }
+  .allow { background: #2f8f5b; } .deny { background: #b04545; }
+  textarea { width: 100%; font: inherit; color: inherit; background: #00000050; border: 1px solid #ffffff1f; border-radius: 12px; padding: 10px; }
+  .say { white-space: pre-wrap; word-break: break-word; }
+  .st { display: inline-block; padding: 1px 9px; border-radius: 99px; background: #ffffff14; font-size: 13px; }
+</style></head>
+<body>
+<h1>✻ Buddy HUD <span class="dim" id="conn">connecting…</span></h1>
+<div id="app"></div>
+<script>
+const T = new URLSearchParams(location.search).get('t') || '';
+const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const md = (s) => esc(s).replace(/```[\w-]*\n?([\s\S]*?)```/g, '<pre>$1</pre>').replace(/`([^`\n]+)`/g, '<code>$1</code>').replace(/\*\*([^*\n]+)\*\*/g, '<b>$1</b>');
+const api = (p, body) => fetch(p + '?t=' + encodeURIComponent(T), body ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {}).then((r) => r.json());
+const LABEL = { idle: '😴 idle', thinking: '💭 thinking', tool: '⚙️ working', waiting: '🙋 needs you', permission: '🔐 needs permission', done: '💬 finished' };
+let typing = '';
+async function tick() {
+  try {
+    const s = await api('/api/state');
+    document.getElementById('conn').textContent = 'connected';
+    const keep = document.activeElement && document.activeElement.tagName === 'TEXTAREA';
+    if (keep) { typing = document.activeElement.value; }
+    const perms = s.perms.map((p) => `<div class="card perm"><b>🔐 Allow ${esc(p.tool)}?</b><div class="dim">${esc(p.project || '')}</div><pre>${esc(p.summary)}</pre><div class="row"><button class="allow" onclick="decide('${p.id}','allow')">Allow</button><button class="deny" onclick="decide('${p.id}','deny')">Deny</button></div></div>`).join('');
+    const ses = s.sessions.map((x) => `<div class="card"><b>${esc(x.project)}</b> <span class="st">${LABEL[x.status] || x.status}</span> <span class="dim">${esc(x.model || '')}</span>${x.tool ? `<div class="dim">${esc(x.tool.name)}: ${esc(x.tool.text)}</div>` : ''}${x.status === 'done' && x.lastMsg ? `<div class="say" style="margin-top:8px">${md(x.lastMsg)}</div>` : ''}<textarea id="r_${esc(x.id)}" rows="2" placeholder="Reply to Claude…"></textarea><div class="row"><button onclick="reply('${esc(x.id)}')">Send</button></div></div>`).join('');
+    const html = (perms + ses) || '<div class="card dim">No active Claude Code sessions.</div>';
+    if (!keep || perms !== window.__perms) {
+      if (html !== window.__html) { document.getElementById('app').innerHTML = html; window.__html = html; window.__perms = perms; }
+    }
+  } catch { document.getElementById('conn').textContent = 'offline'; }
+}
+async function decide(id, behavior) { await api('/api/decide', { id, behavior }); tick(); }
+async function reply(id) { const el = document.getElementById('r_' + id); const text = el.value.trim(); if (!text) return; await api('/api/reply', { sessionId: id, text }); el.value = ''; tick(); }
+setInterval(tick, 1500); tick();
+</script></body></html>
