@@ -110,6 +110,16 @@ const waitFor = async (fn, what, ms = 6000) => { const t = Date.now(); for (;;) 
     await post({ session_id: 's1', hook_event_name: 'Notification', message: 'Claude is waiting for your input' });
     assert.strictEqual((await state()).sessions[0].status, 'waiting');
 
+    // notification alerts: a permission prompt is covered by the PermissionRequest alert, a repeated idle prompt alerts once
+    const alertsFor = async (body) => (await state()).alerts.filter((a) => a.kind === 'ask' && a.body === body).length;
+    assert.strictEqual(await alertsFor('Claude needs your permission to use Bash'), 0, 'permission_prompt notification must not toast');
+    assert.strictEqual(await alertsFor('Claude is waiting for your input'), 1, 'first idle notification alerts');
+    await post({ session_id: 's1', hook_event_name: 'Notification', message: 'Claude is waiting for your input' });
+    assert.strictEqual(await alertsFor('Claude is waiting for your input'), 1, 'repeated idle notification must not alert again');
+    await post({ session_id: 's1', hook_event_name: 'UserPromptSubmit', prompt: 'next' });
+    await post({ session_id: 's1', hook_event_name: 'Notification', message: 'Claude is waiting for your input' });
+    assert.strictEqual(await alertsFor('Claude is waiting for your input'), 2, 'a new wait after activity alerts again');
+
     // phone access: token required, state readable, Allow/Deny works and releases the held hook
     const ph = (method, url, body) => new Promise((resolve, reject) => {
       const r = http.request({ host: '127.0.0.1', port: 47813, path: url, method, agent: false, headers: { 'Content-Type': 'application/json' } }, (res) => { let o = ''; res.on('data', (d) => (o += d)); res.on('end', () => resolve({ status: res.statusCode, body: o })); });

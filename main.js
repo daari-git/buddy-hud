@@ -34,6 +34,7 @@ const sessions = new Map(); // id -> session
 const pendingPerms = new Map(); // id -> { res, sessionId, tool, summary, diff }
 const stopHolds = new Map(); // sessionId -> res
 const queued = new Map(); // sessionId -> [text]
+const testAlerts = []; // HUD_TEST only: alerts that reached alertUser(), exposed on /__state
 const DEFAULTS = { alwaysShow: true, walk: true, phone: { enabled: false, token: '' }, replyMode: false, ctxMax: 200000, scale: 1, privacy: false, pos: null, skin: 'bot', alerts: { notify: true, sound: true, done: true, ask: true, stuck: true, dnd: false } };
 let settings = { ...DEFAULTS };
 try { const saved = JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8')); settings = { ...DEFAULTS, ...saved, alerts: { ...DEFAULTS.alerts, ...(saved.alerts || {}) } }; } catch {}
@@ -286,13 +287,19 @@ function handleEvent(ev) {
       extra = takeQueued(id, 'PostToolUse');
       break;
     }
-    case 'Notification':
+    case 'Notification': {
       // a permission dialog is not an idle prompt: never offer to type into it
-      s.status = (ev.notification_type === 'permission_prompt' || /permission/i.test(ev.message || '')) ? 'permission' : 'waiting';
-      s.note = ev.message || 'needs your attention';
+      const perm = ev.notification_type === 'permission_prompt' || /permission/i.test(ev.message || '');
+      const note = ev.message || 'needs your attention';
+      // Claude Code can repeat the same "waiting for input" notification; alert once per wait
+      const repeat = !perm && s.status === 'waiting' && s.note === note;
+      s.status = perm ? 'permission' : 'waiting';
+      s.note = note;
       pushFeed(s, { emoji: '🙋', text: clip(s.note, 140), kind: 'ask' });
-      alertUser('ask', `Claude · ${s.project}`, s.note);
+      // a permission prompt already raises its own alert from the PermissionRequest hook
+      if (!perm && !repeat) alertUser('ask', `Claude · ${s.project}`, s.note);
       break;
+    }
     case 'Stop':
       s.status = 'done'; s.tool = null; readContext(s); s.lastMsg = ev.last_assistant_message || lastAssistantText(s);
       if (s.turn) s.summary = { ms: Date.now() - s.turn.start, edited: s.turn.edited.slice(), reads: s.turn.reads, cmds: s.turn.cmds, errors: s.turn.errors, away: Date.now() - lastSeenAt > 60000 };
@@ -351,6 +358,7 @@ function toast(title, body) {
 function alertUser(kind, title, body) {
   const a = settings.alerts;
   if (a.dnd || a[kind] === false) return;
+  if (TEST) testAlerts.push({ kind, title, body });
   if (a.notify) toast(title, settings.privacy ? 'Open Buddy HUD for details' : body);
   if (a.sound && win && !win.isDestroyed()) win.webContents.send('alert', kind);
 }
@@ -359,7 +367,7 @@ function alertUser(kind, title, body) {
 const server = http.createServer((req, res) => {
   // browsers always send Origin on cross-site requests; hooks (curl) never do
   if (req.headers.origin) { res.statusCode = 403; return res.end('{}'); }
-  if (TEST && req.method === 'GET' && req.url === '/__state') { res.setHeader('Content-Type', 'application/json'); return res.end(JSON.stringify(snapshot())); }
+  if (TEST && req.method === 'GET' && req.url === '/__state') { res.setHeader('Content-Type', 'application/json'); return res.end(JSON.stringify({ ...snapshot(), alerts: testAlerts })); }
   const chunks = []; let got = 0;
   req.on('data', (d) => { got += d.length; if (got > 5e6) { res.statusCode = 413; res.end('{}'); req.destroy(); } else chunks.push(d); });
   req.on('end', () => {
