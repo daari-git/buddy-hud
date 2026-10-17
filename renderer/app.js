@@ -156,6 +156,7 @@ function actFor(s, perms) {
     return { act: a, eyes: a === 'type' ? 'squint' : 'open', item: s.tool.emoji, item2: ITEM2[s.tool.name] || '', look: a === 'type' ? '' : '' };
   }
   switch (s.status) {
+    case 'tool': // between tools (e.g. a permission was just answered)
     case 'thinking': return { act: 'think', eyes: 'open', item: '💭', item2: '', look: 'up' };
     case 'waiting': return { act: 'wait', eyes: 'wide', item: '💬', item2: '', look: '' };
     case 'permission': return { act: 'wait', eyes: 'wide', item: '🔐', item2: '', look: '' };
@@ -189,11 +190,21 @@ function render() {
 
   const zoom = (state.settings && state.settings.scale) || 1;
   document.documentElement.style.setProperty('--maxdrawer', Math.max(220, Math.floor(screen.availHeight / zoom - 330)) + 'px');
+  // 3D look: load the bundle on first use; fall back to Classic if WebGL is unavailable
+  const skin = (state.settings && state.settings.skin) || 'bot';
+  if (skin === '3d' && !window.__buddy3d && !window.__buddy3dLoading) {
+    window.__buddy3dLoading = true;
+    const sc = document.createElement('script'); sc.src = 'buddy3d.bundle.js';
+    sc.onload = () => { if (!window.__buddy3d || !window.__buddy3d.ok) { console.warn('3D unavailable:', window.__buddy3d && window.__buddy3d.error); hud.send('set', { skin: 'classic' }); } render(); };
+    document.body.appendChild(sc);
+  }
+  document.body.classList.toggle('skin3d', skin === '3d' && !!(window.__buddy3d && window.__buddy3d.ok));
   const svg = $('clawd');
   svg.style.setProperty('--dir', String(pet.dir || 1));
   svg.dataset.skin = (state.settings && state.settings.skin) || 'bot';
   svg.dataset.act = a.act; svg.dataset.eyes = a.eyes; svg.dataset.look = a.look;
   $('item').textContent = a.item; $('item2').textContent = a.item2;
+  if (window.__buddy3d && window.__buddy3d.ok && skin === '3d') window.__buddy3d.update({ act: a.act, eyes: a.eyes, item: a.item, dir: pet.dir, color: th.c, color2: th.c2 });
 
   // context pill
   const pct = s && s.ctx.max ? Math.min(100, (s.ctx.used / s.ctx.max) * 100) : 0;

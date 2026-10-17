@@ -26,7 +26,7 @@ A floating pixel buddy for [Claude Code](https://claude.com/claude-code). It sit
 - **Health indicator.** A dot on the pill: green connected, grey waiting, amber missing hooks or silent, red not installed. Details and a self-test button in the panel and tray.
 - **Phone access (opt-in).** Approve permissions and reply from your phone on the same Wi-Fi. Off by default; see Privacy.
 - **Walks around.** When Claude is idle the buddy strolls along your screen, stops to look around, sits down or naps. When Claude needs you it runs back to the spot where you parked it and waves. Drag it to set its home; turn walking off in settings or the tray.
-- **Looks.** Bot (default), Cat, or Classic (logo homage).
+- **Looks.** Bot (default), Cat, Classic (logo homage), or **3D (beta)**: a soft-voxel buddy with real lighting that turns to face where it walks, types on a little keyboard, holds up a book while reading and swings a magnifying glass while searching. 3D uses more CPU on machines without GPU acceleration (measured on a laptop without it: about 10% asleep, about 34% while Claude works, versus about 8% / 13% for the flat looks).
 - **Multiple sessions.** One tab per Claude Code session.
 
 Click the buddy (or the pill) for history, files and settings. Drag it anywhere.
@@ -104,7 +104,8 @@ Tray menu, "Remove Claude Code hooks", then quit and delete the app. Settings li
 ```bash
 npm start            # run
 npm run dist         # build installers for the current OS
-npm test             # hook installer tests (uses a temp HOME)
+npm test             # unit + end-to-end tests (temp HOME, test ports)
+npm run build:3d     # rebuild renderer/buddy3d.bundle.js after editing renderer/src/buddy3d.js
 npm run promo        # re-record the demo video (needs ffmpeg)
 ```
 

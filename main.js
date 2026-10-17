@@ -63,6 +63,19 @@ const saveSettings = () => {
   } catch {}
 };
 
+// Machines whose GPU process keeps crashing fall back to (stable, cheaper) software rendering next launch
+// Linux: transparent always-on-top windows are cheaper and more stable without GPU compositing (measured ~2x less CPU).
+const useGpu = settings.gpu === 'on' || (settings.gpu !== 'off' && !isLinux);
+if (!useGpu || settings.gpuBroken || process.env.BUDDY_NO_GPU) {
+  app.disableHardwareAcceleration();
+  app.commandLine.appendSwitch('enable-unsafe-swiftshader'); // keep WebGL (3D look) working in software
+}
+let gpuCrashes = 0;
+app.on('child-process-gone', (_e, d) => {
+  if (d.type !== 'GPU' || settings.gpuBroken) return;
+  if (++gpuCrashes >= 2) { settings.gpuBroken = true; saveSettings(); app.relaunch(); app.exit(0); }
+});
+
 const TOOL_EMOJI = {
   Read: '📖', Edit: '✏️', MultiEdit: '✏️', Write: '📝', NotebookEdit: '📓', Bash: '💻',
   Grep: '🔍', Glob: '🗂️', WebFetch: '🌐', WebSearch: '🔎', Task: '🤖', Agent: '🤖',

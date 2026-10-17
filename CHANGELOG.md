@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.0
+
+- New **3D (beta)** look built with Three.js: soft-voxel body, lighting, turns toward its walking direction, real props (keyboard, book, magnifier), blinking eyes and all expressions.
+- Big power cut for every look: removed per-frame drop-shadow and backdrop blur, idle animations tick a few times per second, 3D sleeps without redrawing. Measured idle CPU on Linux went from ~50% to ~8%.
+- Linux renders without GPU compositing by default (cheaper and avoids GPU-process crashes); set `"gpu": "on"` in `~/.buddy-hud/settings.json` to override. Automatic fallback if the GPU process keeps crashing.
+
 ## 0.3.0
 
 - Desktop pet mode: the buddy walks along the screen while Claude is idle (walk, look around, sit, nap) and runs home when Claude needs you. Dragging sets home; toggle in settings or tray.

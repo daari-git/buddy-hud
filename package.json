@@ -1,6 +1,6 @@
 {
   "name": "buddy-hud",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "A floating pixel buddy that shows what Claude Code is doing - live diffs, permissions, context, replies. Unofficial.",
   "main": "main.js",
   "scripts": {
@@ -14,12 +14,15 @@
     "promo": "electron promo/record.js portrait promo/out.mp4",
     "test": "node test/install-hooks.test.js && node test/usage.test.js && node test/e2e.js",
     "test:unit": "node test/install-hooks.test.js",
-    "test:e2e": "node test/e2e.js"
+    "test:e2e": "node test/e2e.js",
+    "build:3d": "esbuild renderer/src/buddy3d.js --bundle --minify --format=iife --target=chrome120 --outfile=renderer/buddy3d.bundle.js"
   },
   "license": "MIT",
   "devDependencies": {
     "electron": "^44.8.0",
-    "electron-builder": "^26.15.3"
+    "electron-builder": "^26.15.3",
+    "esbuild": "^0.28.2",
+    "three": "^0.186.1"
   },
   "productName": "Buddy HUD",
   "author": {
